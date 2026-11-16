@@ -254,11 +254,11 @@ const VERSION_CHANGE_LOG = `1.移除截图权限自检：初始化入口 initGam
 14.全军覆没/灵力耗尽处理流程同样按临时修改标记恢复开启系统AI战斗策略，并把标记清除，避免战败路径让策略长期处于关闭状态。
 15.新增自动更新：设置菜单新增"自动检测并下载更新"开关，开启后启动时后台静默检测并自动下载覆盖重启；主菜单新增"检测更新"，显示新版本号与更新日志并询问是否下载。
 16.修复更新后重启失败：不再删除正在运行的脚本文件，改为直接覆盖写入；脚本运行于缓存临时文件时，改为写入固定路径 /sdcard/msyj-helper/ 并重启该路径。
-16.本版本为更新链路测试版，功能与 2.6.9 完全一致。
+17.更新源简化为只保留脚本文件：不再使用 version.json 清单，检测更新时直接下载整份脚本读取 VERSION_CODE 比对；相同版本直接抛弃，手动检测弹窗询问，静默检测直接覆盖。
+18.本版本为更新链路测试版，功能与 2.6.9 完全一致。
 `;
 // 自动更新源：公共仓库地址，格式为 "用户名/仓库名@分支"，留空则关闭更新功能
 const UPDATE_REPO = "zhxlmzhx/msyj-helper@main";
-const UPDATE_MANIFEST_NAME = "version.json";
 const UPDATE_SCRIPT_NAME = "魔神异界辅助.js";
 const DEFAULT_CONFIG = {
 teamMode: 0,
@@ -1688,14 +1688,10 @@ function buildNoCacheOptions()
 return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } };
 }
 // 生成候选下载地址：清单自带地址 → CDN → GitHub 原始文件
-function buildUpdateUrls(manifest, base, rawBase, stamp)
+function buildUpdateUrls(base, rawBase, stamp)
 {
 var encodedName = encodeURIComponent(UPDATE_SCRIPT_NAME);
 var urls = [];
-if (manifest && manifest.url)
-{
-urls.push(String(manifest.url));
-}
 if (base)
 {
 urls.push(base + encodedName + stamp);
@@ -1704,32 +1700,53 @@ if (rawBase)
 {
 urls.push(rawBase + encodedName + stamp);
 }
-var uniq = [];
-urls.forEach(function (u)
-{
-if (u && uniq.indexOf(u) < 0)
-{
-uniq.push(u);
-}
-});
-return uniq;
+return urls;
 }
 // 读取脚本内声明的版本号，用于 MD5 与清单不一致时的内容兜底判定
-function readScriptVersionCode(bytes)
+function readScriptText(bytes)
 {
 try
 {
-var text = String(new java.lang.String(bytes, "UTF-8"));
+return String(new java.lang.String(bytes, "UTF-8"));
+}
+catch (e)
+{
+return "";
+}
+}
+function readScriptVersionCode(bytes)
+{
+var text = readScriptText(bytes);
+if (!text)
+{
+return -1;
+}
 var hit = text.match(/VERSION_CODE\s*=\s*(\d+)/);
 if (hit && hit[1])
 {
 return parseInt(hit[1]);
 }
-}
-catch (e)
-{
-}
 return -1;
+}
+function readScriptVersionName(bytes)
+{
+var text = readScriptText(bytes);
+var hit = text.match(/VERSION_NAME\s*=\s*"([^"]+)"/);
+if (hit && hit[1])
+{
+return hit[1];
+}
+return "";
+}
+function readScriptChangeLog(bytes)
+{
+var text = readScriptText(bytes);
+var hit = text.match(/VERSION_CHANGE_LOG\s*=\s*`([\s\S]*?)`;/);
+if (hit && hit[1])
+{
+return hit[1];
+}
+return "";
 }
 // 下载更新包字节；失败返回 null
 function downloadUpdateBytes(url)
@@ -1749,202 +1766,80 @@ return null;
 }
 }
 // 拉取远端版本清单：成功返回 { manifest, base, stamp }，失败返回 { error }
-function fetchUpdateManifest()
+// 直接下载远端整份脚本，取版本号最高的一份；失败返回 null
+function fetchRemoteScript()
 {
 var repoInfo = parseUpdateRepo();
 if (!repoInfo)
 {
-return { error: "未配置更新源，请填写脚本顶部的 UPDATE_REPO" };
+return null;
 }
 var base = "https://cdn.jsdelivr.net/gh/" + repoInfo.repoPath + "@" + repoInfo.branch + "/";
 var rawBase = "https://raw.githubusercontent.com/" + repoInfo.repoPath + "/" + repoInfo.branch + "/";
 var stamp = "?t=" + Date.now();
-var urls = [
-base + encodeURIComponent(UPDATE_MANIFEST_NAME) + stamp,
-rawBase + encodeURIComponent(UPDATE_MANIFEST_NAME) + stamp
-];
-var results = [];
-var firstError = "";
-for (var i = 0; i < urls.length; i++)
-{
-try
-{
-var resp = http.get(urls[i], buildNoCacheOptions());
-if (!resp || resp.statusCode !== 200)
-{
-if (!firstError)
-{
-firstError = "版本清单请求失败：" + (resp ? resp.statusCode : "无响应");
-}
-continue;
-}
-var manifest = JSON.parse(resp.body.string());
-var code = parseInt(manifest.versionCode);
-if (isNaN(code))
-{
-if (!firstError)
-{
-firstError = "版本清单格式错误";
-}
-continue;
-}
-results.push({ manifest: manifest, code: code });
-}
-catch (e)
-{
-if (!firstError)
-{
-firstError = "检测更新异常：" + e;
-}
-}
-}
-if (!results.length)
-{
-return { error: firstError || "版本清单请求失败" };
-}
-var best = results[0];
-results.forEach(function (r)
-{
-if (r.code > best.code)
-{
-best = r;
-}
-});
-var md5List = [];
-results.forEach(function (r)
-{
-if (r.code !== best.code)
-{
-return;
-}
-var m = String(r.manifest.md5 || "").toLowerCase();
-if (m && md5List.indexOf(m) < 0)
-{
-md5List.push(m);
-}
-});
-return { manifest: best.manifest, base: base, rawBase: rawBase, stamp: stamp, code: best.code, md5List: md5List };
-}
-// 主菜单手动检测更新：显示新版本号与更新日志，询问是否下载
-function manualCheckUpdate()
-{
-var info = fetchUpdateManifest();
-if (info.error)
-{
-toast(info.error);
-return false;
-}
-if (!info.code || info.code <= VERSION_CODE)
-{
-toast("已是最新版本 " + VERSION_NAME);
-return false;
-}
-var m = info.manifest;
-var tip = "新版本：" + (m.versionName || info.code) + "\n当前版本：" + VERSION_NAME + "\n\n更新日志：\n" + (m.note || "无");
-if (m.force)
-{
-dialogs.alert("发现新版本 " + (m.versionName || info.code), tip + "\n\n本次为强制更新，点击确定开始下载");
-}
-else if (!dialogs.confirm("发现新版本 " + (m.versionName || info.code), tip + "\n\n是否下载并更新？"))
-{
-return false;
-}
-return applyUpdate(info.manifest, info.base, info.rawBase, info.stamp, false, info.md5List);
-}
-// 启动后台静默检测：有新版本则自动下载覆盖并重启，全程不弹窗
-function autoUpdateSilently()
-{
-sleep(1500);
-var info = fetchUpdateManifest();
-if (info.error)
-{
-return;
-}
-if (!info.code || info.code <= VERSION_CODE)
-{
-return;
-}
-applyUpdate(info.manifest, info.base, info.rawBase, info.stamp, true, info.md5List);
-}
-// 下载更新包、校验 MD5 后替换脚本
-function applyUpdate(manifest, base, rawBase, stamp, silent, md5List)
-{
-var primary = String((manifest && manifest.md5) || "").toLowerCase();
-var candidates = [];
-if (primary)
-{
-candidates.push(primary);
-}
-(md5List || []).forEach(function (m)
-{
-if (m && candidates.indexOf(m) < 0)
-{
-candidates.push(m);
-}
-});
-var urls = buildUpdateUrls(manifest, base, rawBase, stamp);
-var versionLabel = String((manifest && manifest.versionName) || parseInt(manifest.versionCode));
-var fallback = null;
-var lastError = "";
-var md5Error = "";
+var urls = buildUpdateUrls(base, rawBase, stamp);
+var best = null;
 for (var i = 0; i < urls.length; i++)
 {
 var bytes = downloadUpdateBytes(urls[i]);
 if (!bytes || bytes.length <= 0)
 {
-lastError = "下载失败：" + urls[i];
 continue;
 }
-if (!candidates.length)
+var code = readScriptVersionCode(bytes);
+if (code <= 0)
 {
-return installUpdate(bytes, versionLabel, silent);
-}
-var actual = "";
-try
-{
-actual = md5Hex(bytes);
-}
-catch (e)
-{
-}
-if (!actual)
-{
-lastError = "无法校验更新包";
 continue;
 }
-if (actual === primary)
+var name = readScriptVersionName(bytes) || String(code);
+var changeLog = readScriptChangeLog(bytes);
+if (!best || code > best.code)
 {
-return installUpdate(bytes, versionLabel, silent);
+best = { bytes: bytes, code: code, name: name, changeLog: changeLog, url: urls[i] };
 }
-if (candidates.indexOf(actual) >= 0)
+}
+return best;
+}
+// 主菜单手动检测更新：显示新版本号与更新日志，询问是否下载
+// 主菜单手动检测更新：下载整份脚本比对版本号，有新版本才弹窗询问
+function manualCheckUpdate()
 {
-if (!fallback)
+var remote = fetchRemoteScript();
+if (!remote)
 {
-fallback = { bytes: bytes };
-}
-continue;
-}
-var declaredCode = readScriptVersionCode(bytes);
-if (declaredCode > 0 && declaredCode === parseInt(manifest.versionCode))
-{
-if (!fallback)
-{
-fallback = { bytes: bytes };
-}
-continue;
-}
-md5Error = "校验失败（实际 " + actual + "，期望 " + candidates.join(" 或 ") + "）";
-}
-if (fallback)
-{
-return installUpdate(fallback.bytes, versionLabel, silent);
-}
-if (!silent)
-{
-toast("更新失败：" + (md5Error || lastError));
-}
+toast("检测更新失败，请检查网络或更新源配置");
 return false;
 }
+if (remote.code <= VERSION_CODE)
+{
+toast("已是最新版本 " + VERSION_NAME);
+return false;
+}
+var tip = "新版本：" + remote.name + "\n当前版本：" + VERSION_NAME + "\n\n更新日志：\n" + (remote.changeLog || "无");
+if (!dialogs.confirm("发现新版本 " + remote.name, tip + "\n\n是否下载并更新？"))
+{
+return false;
+}
+return installUpdate(remote.bytes, remote.name, false);
+}
+// 启动后台静默检测：有新版本则自动下载覆盖并重启，全程不弹窗
+// 启动后台静默更新：有新版本直接覆盖，无新版本或失败都静默退出
+function autoUpdateSilently()
+{
+sleep(1500);
+var remote = fetchRemoteScript();
+if (!remote)
+{
+return;
+}
+if (remote.code <= VERSION_CODE)
+{
+return;
+}
+installUpdate(remote.bytes, remote.name, true);
+}
+// 下载更新包、校验 MD5 后替换脚本
+
 // 计算字节数组的 MD5
 function md5Hex(bytes)
 {
@@ -2054,8 +1949,18 @@ if (!silent)
 {
 toast("重启脚本失败，请手动运行：" + targetPath);
 }
-}
 sleep(400);
+exit();
+return false;
+}
+sleep(600);
+try
+{
+engines.myEngine().forceStop();
+}
+catch (e)
+{
+}
 exit();
 return true;
 }
