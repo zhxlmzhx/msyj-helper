@@ -2,7 +2,7 @@
   "versionName": "2.7.0",
   "versionCode": 270,
   "url": "https://cdn.jsdelivr.net/gh/zhxlmzhx/msyj-helper@main/魔神异界辅助.js",
-  "md5": "0fd886b7e95d869842b08b9a50feadf4",
+  "md5": "59fc379aa1874a385511e702d032fd52",
   "force": false,
-  "note": "1.设置菜单的自动检测并下载更新开关移到开关分类最后一项（模式之前）。2.本版本为更新链路测试版，功能与 2.6.9 完全一致，仅版本号不同。"
+  "note": "1.设置菜单的自动检测并下载更新开关移到开关分类最后一项（模式之前）。2.更新包下载改为多源回退：清单地址、jsDelivr、GitHub 原始文件依次尝试，避免 CDN 旧缓存导致 MD5 校验失败。3.本版本为更新链路测试版，功能与 2.6.9 完全一致。"
 }

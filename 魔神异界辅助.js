@@ -252,7 +252,7 @@ const VERSION_CHANGE_LOG = `1.移除截图权限自检：初始化入口 initGam
 12.魔兽装备标记 isEquipPetFlag 初始值由 true 改为 false，脚本启动时不再假定魔兽已装备，手动进局遇怪时也能走装备流程；滑动分支内多余的置假语句已移除。
 13.新增全局标记 hasUnloadedPetOnFirstMapEnter，进入地图函数调用卸载前若为假，说明本轮还没卸载过魔兽，则先打标记并把 isEquipPetFlag 置真，保证首次进图能正常执行卸载、清掉上一轮残留。
 14.全军覆没/灵力耗尽处理流程同样按临时修改标记恢复开启系统AI战斗策略，并把标记清除，避免战败路径让策略长期处于关闭状态。
-15.新增自动更新：设置菜单新增"自动检测并下载更新"开关，开启后启动时后台静默检测并自动覆盖重启；主菜单新增"检测更新"，显示新版本号与更新日志并询问是否下载。
+15.新增自动更新：设置菜单新增"自动检测并下载更新"开关，开启后启动时后台静默检测并自动下载覆盖重启；主菜单新增"检测更新"，显示新版本号与更新日志并询问是否下载。
 16.本版本为更新链路测试版，功能与 2.6.9 完全一致，仅版本号不同。
 `;
 // 自动更新源：公共仓库地址，格式为 "用户名/仓库名@分支"，留空则关闭更新功能
@@ -1659,34 +1659,135 @@ autoUpdateSilently();
 });
 }
 initGameScript();
+// 解析更新源配置，拆出仓库路径与分支
+function parseUpdateRepo()
+{
+var raw = String(UPDATE_REPO || "");
+if (!raw)
+{
+return null;
+}
+var branch = "main";
+var repoPath = raw;
+var at = raw.indexOf("@");
+if (at >= 0)
+{
+repoPath = raw.substring(0, at);
+branch = raw.substring(at + 1) || "main";
+}
+if (repoPath.indexOf("/") < 0)
+{
+return null;
+}
+return { repoPath: repoPath, branch: branch };
+}
+// 统一使用不缓存的请求头，降低 CDN 旧缓存命中概率
+function buildNoCacheOptions()
+{
+return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } };
+}
+// 生成候选下载地址：清单自带地址 → CDN → GitHub 原始文件
+function buildUpdateUrls(manifest, base, stamp)
+{
+var repoInfo = parseUpdateRepo();
+var encodedName = encodeURIComponent(UPDATE_SCRIPT_NAME);
+var urls = [];
+if (manifest && manifest.url)
+{
+urls.push(String(manifest.url));
+}
+if (base)
+{
+urls.push(base + encodedName + stamp);
+}
+if (repoInfo)
+{
+urls.push("https://raw.githubusercontent.com/" + repoInfo.repoPath + "/" + repoInfo.branch + "/" + encodedName + stamp);
+}
+var uniq = [];
+urls.forEach(function (u)
+{
+if (u && uniq.indexOf(u) < 0)
+{
+uniq.push(u);
+}
+});
+return uniq;
+}
+// 下载更新包字节；失败返回 null
+function downloadUpdateBytes(url)
+{
+try
+{
+var resp = http.get(url, buildNoCacheOptions());
+if (!resp || resp.statusCode !== 200)
+{
+return null;
+}
+return resp.body.bytes();
+}
+catch (e)
+{
+return null;
+}
+}
 // 拉取远端版本清单：成功返回 { manifest, base, stamp }，失败返回 { error }
 function fetchUpdateManifest()
 {
-if (!UPDATE_REPO)
+var repoInfo = parseUpdateRepo();
+if (!repoInfo)
 {
 return { error: "未配置更新源，请填写脚本顶部的 UPDATE_REPO" };
 }
-var base = "https://cdn.jsdelivr.net/gh/" + UPDATE_REPO + "/";
+var base = "https://cdn.jsdelivr.net/gh/" + repoInfo.repoPath + "@" + repoInfo.branch + "/";
 var stamp = "?t=" + Date.now();
+var manifestUrls = [
+base + encodeURIComponent(UPDATE_MANIFEST_NAME) + stamp,
+"https://raw.githubusercontent.com/" + repoInfo.repoPath + "/" + repoInfo.branch + "/" + encodeURIComponent(UPDATE_MANIFEST_NAME) + stamp
+];
+var best = null;
+var firstError = "";
+for (var i = 0; i < manifestUrls.length; i++)
+{
 try
 {
-var resp = http.get(base + UPDATE_MANIFEST_NAME + stamp);
+var resp = http.get(manifestUrls[i], buildNoCacheOptions());
 if (!resp || resp.statusCode !== 200)
 {
-return { error: "版本清单请求失败：" + (resp ? resp.statusCode : "无响应") };
+if (!firstError)
+{
+firstError = "版本清单请求失败：" + (resp ? resp.statusCode : "无响应");
+}
+continue;
 }
 var manifest = JSON.parse(resp.body.string());
 var code = parseInt(manifest.versionCode);
 if (isNaN(code))
 {
-return { error: "版本清单格式错误" };
+if (!firstError)
+{
+firstError = "版本清单格式错误";
 }
-return { manifest: manifest, base: base, stamp: stamp, code: code };
+continue;
+}
+if (!best || code > best.code)
+{
+best = { manifest: manifest, base: base, stamp: stamp, code: code };
+}
 }
 catch (e)
 {
-return { error: "检测更新异常：" + e };
+if (!firstError)
+{
+firstError = "检测更新异常：" + e;
 }
+}
+}
+if (!best)
+{
+return { error: firstError || "版本清单请求失败" };
+}
+return best;
 }
 // 主菜单手动检测更新：显示新版本号与更新日志，询问是否下载
 function manualCheckUpdate()
@@ -1732,40 +1833,18 @@ applyUpdate(info.manifest, info.base, info.stamp, true);
 // 下载更新包、校验 MD5 后替换脚本
 function applyUpdate(manifest, base, stamp, silent)
 {
-var fileUrl = manifest.url || (base + UPDATE_SCRIPT_NAME);
-var dl = null;
-try
+var expectMd5 = String((manifest && manifest.md5) || "").toLowerCase();
+var urls = buildUpdateUrls(manifest, base, stamp);
+var lastError = "";
+var md5Error = "";
+for (var i = 0; i < urls.length; i++)
 {
-dl = http.get(fileUrl + stamp);
-}
-catch (e)
-{
-if (!silent)
-{
-toast("更新包下载失败：" + e);
-}
-return false;
-}
-if (!dl || dl.statusCode !== 200)
-{
-if (!silent)
-{
-toast("更新包下载失败：" + (dl ? dl.statusCode : "无响应"));
-}
-return false;
-}
-var bytes = dl.body.bytes();
+var bytes = downloadUpdateBytes(urls[i]);
 if (!bytes || bytes.length <= 0)
 {
-if (!silent)
-{
-toast("更新包内容为空，已取消更新");
+lastError = "下载失败：" + urls[i];
+continue;
 }
-return false;
-}
-var expectMd5 = String(manifest.md5 || "").toLowerCase();
-if (expectMd5)
-{
 var actualMd5 = "";
 try
 {
@@ -1774,16 +1853,23 @@ actualMd5 = md5Hex(bytes);
 catch (e)
 {
 }
-if (actualMd5 && actualMd5 !== expectMd5)
+if (expectMd5 && !actualMd5)
 {
-if (!silent)
+lastError = "无法校验更新包";
+continue;
+}
+if (expectMd5 && actualMd5 !== expectMd5)
 {
-toast("更新包校验失败，已取消更新");
-}
-return false;
-}
+md5Error = "校验失败（实际 " + actualMd5 + "，期望 " + expectMd5 + "）";
+continue;
 }
 return installUpdate(bytes, manifest.versionName || String(parseInt(manifest.versionCode)), silent);
+}
+if (!silent)
+{
+toast("更新失败：" + (md5Error || lastError));
+}
+return false;
 }
 // 计算字节数组的 MD5
 function md5Hex(bytes)
