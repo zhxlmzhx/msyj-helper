@@ -235,10 +235,11 @@ var selectedDungeonIndex = 0;
 var enableTianGangBlast = false;
 var tianGangEndTime = 0;
 var jyqtsh = false;
-const VERSION_NAME = "2.7.3";
-const VERSION_CODE = 273;
+const VERSION_NAME = "2.7.4";
+const VERSION_CODE = 274;
 const VERSION_UPDATE_TIME = "2026-11-17";
-const VERSION_CHANGE_LOG = `1.静默更新改为子线程下载加 10 秒限时等待：下载卡住时不再阻塞主菜单，超时直接提示并跳过本次；下载成功后的写入与重启仍回到主线程执行。
+const VERSION_CHANGE_LOG = `1.静默更新改为菜单弹出后由后台线程执行：主菜单循环打标记后只启动 threads.start，主线程继续弹菜单，不再等待下载结果。
+2.静默更新改为子线程下载加 10 秒限时等待：下载卡住时不再阻塞主菜单，超时直接提示并跳过本次；下载成功后的写入与重启仍回到主线程执行。
 2.主菜单循环内改为先判断自动更新开关与更新标记：开关开启且未标记时，才打标记并执行静默更新。
 2.更新请求全部加短超时：http 5 秒、IPv4 直连 4/7 秒、Java 4/7 秒，单地址总耗时超过 12 秒不再尝试后续通道，避免 IPv6 不可达时长时间卡在主菜单前。
 2.静默模式下检测失败也弹提示（原先完全无输出，无法判断是没触发还是下载失败）。
@@ -1603,45 +1604,29 @@ hallAction_Sign();
 }
 }
 // 静默更新：下载放到子线程并限时等待，避免网络卡住时阻塞主菜单；文件写入仍在主线程完成
-function runSilentUpdateOnce()
+// 静默更新：主菜单弹出后由后台线程接管，检测到新版本直接覆盖并重启，全程不弹窗
+function startSilentUpdateOnce()
 {
-var holder = { done: false, remote: null, error: "" };
-var th = threads.start(function ()
+threads.start(function ()
 {
 try
 {
-holder.remote = fetchRemoteScript();
-holder.error = lastUpdateError;
-}
-catch (e)
+var remote = fetchRemoteScript();
+if (!remote)
 {
-holder.error = String(e);
+return;
 }
-holder.done = true;
-});
-try
-{
-th.join(10000);
-}
-catch (e)
-{
-}
-if (!holder.done)
-{
-toast("自动更新：网络超时，本次跳过");
-return false;
-}
-if (!holder.remote)
-{
-toast("静默更新失败：" + (holder.error || "无法获取远端脚本"));
-return false;
-}
-if (holder.remote.code <= VERSION_CODE)
+if (remote.code <= VERSION_CODE)
 {
 removeUpdateBackup();
-return false;
+return;
 }
-return installUpdate(holder.remote.bytes, holder.remote.name, true);
+installUpdate(remote.bytes, remote.name, true);
+}
+catch (e)
+{
+}
+});
 }
 // 显示主菜单并分发用户选择
 function showMainMenu()
@@ -1649,11 +1634,11 @@ function showMainMenu()
 // 菜单循环：反复显示主菜单并分发用户选择，返回跑图后退出
 while (true)
 {
-// 静默检测更新：开关开启且本轮尚未打过标记时，打标记并执行一次，之后返回菜单不再重复扫描
+// 静默检测更新：开关开启且本轮尚未打过标记时，打标记并启动后台线程，等主菜单弹出后再执行，之后返回菜单不再重复扫描
 if (enableAutoUpdate && !hasSilentUpdateChecked)
 {
 hasSilentUpdateChecked = true;
-runSilentUpdateOnce();
+startSilentUpdateOnce();
 }
 let select = dialogs.select("主菜单", [
 "跑图/刷怪",
