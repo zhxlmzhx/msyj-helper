@@ -252,7 +252,7 @@ const VERSION_CHANGE_LOG = `1.移除截图权限自检：初始化入口 initGam
 12.魔兽装备标记 isEquipPetFlag 初始值由 true 改为 false，脚本启动时不再假定魔兽已装备，手动进局遇怪时也能走装备流程；滑动分支内多余的置假语句已移除。
 13.新增全局标记 hasUnloadedPetOnFirstMapEnter，进入地图函数调用卸载前若为假，说明本轮还没卸载过魔兽，则先打标记并把 isEquipPetFlag 置真，保证首次进图能正常执行卸载、清掉上一轮残留。
 14.全军覆没/灵力耗尽处理流程同样按临时修改标记恢复开启系统AI战斗策略，并把标记清除，避免战败路径让策略长期处于关闭状态。
-15.新增自动更新：设置菜单新增"自动检测并下载更新"开关，开启后启动时后台静默检测并自动下载覆盖重启；主菜单新增"检测更新"，显示新版本号与更新日志并询问是否下载。
+15.新增自动更新：设置菜单新增"自动检测并下载更新"开关，开启后启动时后台静默检测并自动下载覆盖重启；主菜单新增"检测更新"，显示新版本号与更新日志并询问是否下载。两者共用同一个检测更新函数，自动更新以 silent 参数调用，不弹询问框。
 16.修复更新后重启失败：不再删除正在运行的脚本文件，改为直接覆盖写入；脚本运行于缓存临时文件时，改为写入固定路径 /sdcard/msyj-helper/ 并重启该路径。
 17.更新源简化为只保留脚本文件：不再使用 version.json 清单，检测更新时直接下载整份脚本读取 VERSION_CODE 比对；相同版本直接抛弃，手动检测弹窗询问，静默检测直接覆盖。
 18.本版本为更新链路测试版，功能与 2.6.9 完全一致。
@@ -1629,7 +1629,7 @@ openSettingMenu();
 }
 else if (select === 6)
 {
-manualCheckUpdate();
+manualCheckUpdate(false);
 }
 else
 {
@@ -1652,12 +1652,10 @@ if (!runFlag)
 {
 exit();
 }
+// 自动更新在进入游戏初始化前同步执行：避免线程内检测被打断，也避免先初始化再重启
 if (enableAutoUpdate)
 {
-threads.start(function ()
-{
-autoUpdateSilently();
-});
+manualCheckUpdate(true);
 }
 initGameScript();
 // 解析更新源配置，拆出仓库路径与分支
@@ -1685,7 +1683,7 @@ return { repoPath: repoPath, branch: branch };
 // 统一使用不缓存的请求头，降低 CDN 旧缓存命中概率
 function buildNoCacheOptions()
 {
-return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } };
+return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" }, timeout: 8000 };
 }
 // 生成候选下载地址：清单自带地址 → CDN → GitHub 原始文件
 function buildUpdateUrls(base, rawBase, stamp)
@@ -1802,18 +1800,37 @@ return best;
 }
 // 主菜单手动检测更新：显示新版本号与更新日志，询问是否下载
 // 主菜单手动检测更新：下载整份脚本比对版本号，有新版本才弹窗询问
-function manualCheckUpdate()
+// 检测更新：直接下载整份脚本比对版本号；silent 为真表示自动更新，找到新版本不询问直接覆盖
+function manualCheckUpdate(silent)
 {
 var remote = fetchRemoteScript();
 if (!remote)
 {
+if (!silent)
+{
 toast("检测更新失败，请检查网络或更新源配置");
+}
+else
+{
+console.log("[自动更新] 跳过：远端脚本获取失败");
+}
 return false;
 }
 if (remote.code <= VERSION_CODE)
 {
+if (!silent)
+{
 toast("已是最新版本 " + VERSION_NAME);
+}
+else
+{
+console.log("[自动更新] 跳过：已是最新版本 " + VERSION_NAME);
+}
 return false;
+}
+if (silent)
+{
+return installUpdate(remote.bytes, remote.name, true);
 }
 var tip = "新版本：" + remote.name + "\n当前版本：" + VERSION_NAME + "\n\n更新日志：\n" + (remote.changeLog || "无");
 if (!dialogs.confirm("发现新版本 " + remote.name, tip + "\n\n是否下载并更新？"))
@@ -1824,20 +1841,7 @@ return installUpdate(remote.bytes, remote.name, false);
 }
 // 启动后台静默检测：有新版本则自动下载覆盖并重启，全程不弹窗
 // 启动后台静默更新：有新版本直接覆盖，无新版本或失败都静默退出
-function autoUpdateSilently()
-{
-sleep(1500);
-var remote = fetchRemoteScript();
-if (!remote)
-{
-return;
-}
-if (remote.code <= VERSION_CODE)
-{
-return;
-}
-installUpdate(remote.bytes, remote.name, true);
-}
+
 // 下载更新包、校验 MD5 后替换脚本
 
 // 覆盖当前脚本并重启自身
