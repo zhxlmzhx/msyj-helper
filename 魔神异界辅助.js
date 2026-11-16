@@ -235,10 +235,11 @@ var selectedDungeonIndex = 0;
 var enableTianGangBlast = false;
 var tianGangEndTime = 0;
 var jyqtsh = false;
-const VERSION_NAME = "2.7.3";
-const VERSION_CODE = 273;
-const VERSION_UPDATE_TIME = "2026-11-15";
-const VERSION_CHANGE_LOG = `1.更新地址增加镜像兜底：原始地址连不上时（例如手机只解析到 IPv6）自动依次尝试 ghproxy.net、gh-proxy.com、ghfast.top，仍失败才提示检测失败。
+const VERSION_NAME = "2.7.4";
+const VERSION_CODE = 274;
+const VERSION_UPDATE_TIME = "2026-11-17";
+const VERSION_CHANGE_LOG = `1.更新地址固定为镜像 gh-proxy.com，不再尝试 GitHub 原始域名与其他镜像，避免手机仅解析到 IPv6 时反复失败。
+2.更新地址增加镜像兜底：原始地址连不上时（例如手机只解析到 IPv6）自动依次尝试 ghproxy.net、gh-proxy.com、ghfast.top，仍失败才提示检测失败。
 2.更新下载增加兜底通道：先用 AutoJs 的 http 拉取，失败再改用 Java 连接读取；两路都失败时把具体原因（http 状态/异常信息）显示在提示里，便于排查网络问题。
 2.检测更新改为整包比对：不再依赖 version.json 清单，直接下载整份脚本读取包内 VERSION_CODE 与本地比对，相同版本直接抛弃；手动检测弹窗询问，自动检测直接覆盖；更新地址只保留 GitHub 原始文件一个（jsDelivr 按路径缓存、刷新不可控，已弃用），每次启动只扫描一轮。
 2.更新保留备份与回滚：写入前把旧脚本备份为 .bak（临时脚本场景同样备份），写入失败或长度异常自动用备份回滚，更新成功后备份保留；确认没有新版本时清理历史遗留的 .bak。
@@ -1693,16 +1694,12 @@ return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } };
 // 生成候选下载地址：清单自带地址 → CDN → GitHub 原始文件
 // 只使用 GitHub 原始文件地址：数据权威、无边缘缓存；jsDelivr 按路径缓存且刷新不可控，已弃用
 // 生成候选下载地址：GitHub 原始地址优先，镜像代理兜底（手机只解析到 IPv6 时原始地址会连不上）
+// 只使用镜像地址 gh-proxy.com 下载脚本：GitHub 原始域名在部分手机上只解析到 IPv6 导致连不上
 function buildUpdateUrls(repoInfo, stamp)
 {
 var encodedName = encodeURIComponent(UPDATE_SCRIPT_NAME);
 var path = repoInfo.repoPath + "/" + repoInfo.branch + "/" + encodedName;
-var urls = [];
-urls.push("https://raw.githubusercontent.com/" + path + stamp);
-urls.push("https://ghproxy.net/https://raw.githubusercontent.com/" + path + stamp);
-urls.push("https://gh-proxy.com/https://raw.githubusercontent.com/" + path + stamp);
-urls.push("https://ghfast.top/https://raw.githubusercontent.com/" + path + stamp);
-return urls;
+return ["https://gh-proxy.com/https://raw.githubusercontent.com/" + path + stamp];
 }
 // 读取脚本内声明的版本号，用于 MD5 与清单不一致时的内容兜底判定
 function readScriptText(bytes)
