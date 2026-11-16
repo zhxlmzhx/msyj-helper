@@ -238,7 +238,8 @@ var jyqtsh = false;
 const VERSION_NAME = "2.7.0";
 const VERSION_CODE = 270;
 const VERSION_UPDATE_TIME = "2026-11-17";
-const VERSION_CHANGE_LOG = `1.更新成功后直接删除备份文件：写入校验通过即 remove 掉 .bak，只在写入失败或长度异常时用备份回滚。
+const VERSION_CHANGE_LOG = `1.静默检测更新移到主菜单循环内：进入循环时先检测一次，用 hasSilentUpdateChecked 标记，跑完菜单再次回到主菜单不再重复扫描。
+2.更新成功后直接删除备份文件：写入校验通过即 remove 掉 .bak，只在写入失败或长度异常时用备份回滚。
 2.主地址直连改走 IPv4：先解析 A 记录再连 IP，配合 SNI 与 HTTPS 主机名校验，证书仍按 raw.githubusercontent.com 校验，不放弃安全性；连不上时依次回退 Java 默认连接与 gh-proxy.com 镜像。
 2.更新地址固定为镜像 gh-proxy.com，不再尝试 GitHub 原始域名与其他镜像，避免手机仅解析到 IPv6 时反复失败。
 2.更新地址增加镜像兜底：原始地址连不上时（例如手机只解析到 IPv6）自动依次尝试 ghproxy.net、gh-proxy.com、ghfast.top，仍失败才提示检测失败。
@@ -268,6 +269,8 @@ const VERSION_CHANGE_LOG = `1.更新成功后直接删除备份文件：写入�
 const UPDATE_REPO = "zhxlmzhx/msyj-helper@main";
 const UPDATE_SCRIPT_NAME = "魔神异界辅助.js";
 var lastUpdateError = "";
+// 标记本轮启动是否已做过静默更新检测，保证只检测一次
+var hasSilentUpdateChecked = false;
 const DEFAULT_CONFIG = {
 teamMode: 0,
 CARD_COUNT: 2,
@@ -1601,6 +1604,15 @@ function showMainMenu()
 // 菜单循环：反复显示主菜单并分发用户选择，返回跑图后退出
 while (true)
 {
+// 静默检测更新：只在循环首次进入时执行一次，后续返回菜单不再重复扫描
+if (!hasSilentUpdateChecked)
+{
+hasSilentUpdateChecked = true;
+if (enableAutoUpdate)
+{
+manualCheckUpdate(true);
+}
+}
 let select = dialogs.select("主菜单", [
 "跑图/刷怪",
 "签到",
@@ -1659,11 +1671,6 @@ let runFlag = showMainMenu();
 if (!runFlag)
 {
 exit();
-}
-// 自动更新在主菜单显示完成后执行：主线程内单次扫描，避免后台线程里 http 挂起导致静默无响应
-if (enableAutoUpdate)
-{
-manualCheckUpdate(true);
 }
 initGameScript();
 // 解析更新源配置，拆出仓库路径与分支
