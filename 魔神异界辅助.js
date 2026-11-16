@@ -1652,13 +1652,10 @@ if (!runFlag)
 {
 exit();
 }
-// 自动更新在主菜单展示之后异步执行：不阻塞菜单，单次扫描，取到数据就处理
+// 自动更新在主菜单显示完成后执行：主线程内单次扫描，避免后台线程里 http 挂起导致静默无响应
 if (enableAutoUpdate)
 {
-threads.start(function ()
-{
 manualCheckUpdate(true);
-});
 }
 initGameScript();
 // 解析更新源配置，拆出仓库路径与分支
@@ -1785,13 +1782,16 @@ for (var i = 0; i < urls.length; i++)
 var bytes = downloadUpdateBytes(urls[i]);
 if (!bytes || bytes.length <= 0)
 {
+console.log("[自动更新] 下载失败：" + urls[i]);
 continue;
 }
 var code = readScriptVersionCode(bytes);
 if (code <= 0)
 {
+console.log("[自动更新] 版本号解析失败：" + urls[i] + "，长度 " + bytes.length);
 continue;
 }
+console.log("[自动更新] 命中源 " + (i === 0 ? "raw" : "cdn") + "，远端版本 " + code);
 return { bytes: bytes, code: code, name: readScriptVersionName(bytes) || String(code), changeLog: readScriptChangeLog(bytes), url: urls[i] };
 }
 return null;
