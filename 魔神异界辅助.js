@@ -235,10 +235,11 @@ var selectedDungeonIndex = 0;
 var enableTianGangBlast = false;
 var tianGangEndTime = 0;
 var jyqtsh = false;
-const VERSION_NAME = "2.7.2";
-const VERSION_CODE = 272;
+const VERSION_NAME = "2.7.3";
+const VERSION_CODE = 273;
 const VERSION_UPDATE_TIME = "2026-11-17";
-const VERSION_CHANGE_LOG = `1.主菜单循环内改为先判断自动更新开关与更新标记：开关开启且未标记时，才打标记并执行静默更新。
+const VERSION_CHANGE_LOG = `1.静默更新改为子线程下载加 10 秒限时等待：下载卡住时不再阻塞主菜单，超时直接提示并跳过本次；下载成功后的写入与重启仍回到主线程执行。
+2.主菜单循环内改为先判断自动更新开关与更新标记：开关开启且未标记时，才打标记并执行静默更新。
 2.更新请求全部加短超时：http 5 秒、IPv4 直连 4/7 秒、Java 4/7 秒，单地址总耗时超过 12 秒不再尝试后续通道，避免 IPv6 不可达时长时间卡在主菜单前。
 2.静默模式下检测失败也弹提示（原先完全无输出，无法判断是没触发还是下载失败）。
 3.静默检测更新移到主菜单循环内：进入循环时先检测一次，用 hasSilentUpdateChecked 标记，跑完菜单再次回到主菜单不再重复扫描。
@@ -1601,6 +1602,47 @@ hallAction_Sign();
 }
 }
 }
+// 静默更新：下载放到子线程并限时等待，避免网络卡住时阻塞主菜单；文件写入仍在主线程完成
+function runSilentUpdateOnce()
+{
+var holder = { done: false, remote: null, error: "" };
+var th = threads.start(function ()
+{
+try
+{
+holder.remote = fetchRemoteScript();
+holder.error = lastUpdateError;
+}
+catch (e)
+{
+holder.error = String(e);
+}
+holder.done = true;
+});
+try
+{
+th.join(10000);
+}
+catch (e)
+{
+}
+if (!holder.done)
+{
+toast("自动更新：网络超时，本次跳过");
+return false;
+}
+if (!holder.remote)
+{
+toast("静默更新失败：" + (holder.error || "无法获取远端脚本"));
+return false;
+}
+if (holder.remote.code <= VERSION_CODE)
+{
+removeUpdateBackup();
+return false;
+}
+return installUpdate(holder.remote.bytes, holder.remote.name, true);
+}
 // 显示主菜单并分发用户选择
 function showMainMenu()
 {
@@ -1611,7 +1653,7 @@ while (true)
 if (enableAutoUpdate && !hasSilentUpdateChecked)
 {
 hasSilentUpdateChecked = true;
-manualCheckUpdate(true);
+runSilentUpdateOnce();
 }
 let select = dialogs.select("主菜单", [
 "跑图/刷怪",
