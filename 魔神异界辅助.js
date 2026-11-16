@@ -235,8 +235,8 @@ var selectedDungeonIndex = 0;
 var enableTianGangBlast = false;
 var tianGangEndTime = 0;
 var jyqtsh = false;
-const VERSION_NAME = "2.7.6";
-const VERSION_CODE = 276;
+const VERSION_NAME = "2.7.0";
+const VERSION_CODE = 270;
 const VERSION_UPDATE_TIME = "2026-11-17";
 const VERSION_CHANGE_LOG = `1.静默检测更新移回初始化入口之前：主菜单返回后、initGameScript() 之前判断开关与标记，符合就执行一次。
 2.更新逻辑恢复为直接调用：菜单循环内确认开关开启且未打标记后，同步执行一次 manualCheckUpdate(true)，移除后台线程与超时等待。
