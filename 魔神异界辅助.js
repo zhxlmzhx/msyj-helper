@@ -238,7 +238,7 @@ var jyqtsh = false;
 const VERSION_NAME = "2.7.1";
 const VERSION_CODE = 271;
 const VERSION_UPDATE_TIME = "2026-11-15";
-const VERSION_CHANGE_LOG = `1.检测更新改为整包比对：不再依赖 version.json 清单，直接下载整份脚本读取包内 VERSION_CODE 与本地比对，相同版本直接抛弃；手动检测弹窗询问，自动检测直接覆盖；下载地址 GitHub 原始文件优先、CDN 回退，每次启动只扫描一轮。
+const VERSION_CHANGE_LOG = `1.检测更新改为整包比对：不再依赖 version.json 清单，直接下载整份脚本读取包内 VERSION_CODE 与本地比对，相同版本直接抛弃；手动检测弹窗询问，自动检测直接覆盖；更新地址只保留 GitHub 原始文件一个（jsDelivr 按路径缓存、刷新不可控，已弃用），每次启动只扫描一轮。
 2.更新保留备份与回滚：写入前把旧脚本备份为 .bak（临时脚本场景同样备份），写入失败或长度异常自动用备份回滚，更新成功后备份保留；确认没有新版本时清理历史遗留的 .bak。
 3.移除全部控制台日志输出。
 4.移除截图权限自检：初始化入口 initGameScript() 已申请屏幕投影权限，未授权直接退出，因此 colorProbeSlots() 内的 screenReady 探测与 ensureScreenCapture() 函数一并删除，不再重复取图确认。
@@ -1688,20 +1688,10 @@ function buildNoCacheOptions()
 return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } };
 }
 // 生成候选下载地址：清单自带地址 → CDN → GitHub 原始文件
-function buildUpdateUrls(base, rawBase, stamp)
+// 只使用 GitHub 原始文件地址：数据权威、无边缘缓存；jsDelivr 按路径缓存且刷新不可控，已弃用
+function buildUpdateUrls(rawBase, stamp)
 {
-var encodedName = encodeURIComponent(UPDATE_SCRIPT_NAME);
-// 原始文件优先（权威、更新及时），CDN 仅作回退：CDN 边缘缓存可能长期返回旧构建
-var urls = [];
-if (rawBase)
-{
-urls.push(rawBase + encodedName + stamp);
-}
-if (base)
-{
-urls.push(base + encodedName + stamp);
-}
-return urls;
+return [rawBase + encodeURIComponent(UPDATE_SCRIPT_NAME) + stamp];
 }
 // 读取脚本内声明的版本号，用于 MD5 与清单不一致时的内容兜底判定
 function readScriptText(bytes)
@@ -1775,10 +1765,9 @@ if (!repoInfo)
 {
 return null;
 }
-var base = "https://cdn.jsdelivr.net/gh/" + repoInfo.repoPath + "@" + repoInfo.branch + "/";
 var rawBase = "https://raw.githubusercontent.com/" + repoInfo.repoPath + "/" + repoInfo.branch + "/";
 var stamp = "?t=" + Date.now();
-var urls = buildUpdateUrls(base, rawBase, stamp);
+var urls = buildUpdateUrls(rawBase, stamp);
 for (var i = 0; i < urls.length; i++)
 {
 var bytes = downloadUpdateBytes(urls[i]);
