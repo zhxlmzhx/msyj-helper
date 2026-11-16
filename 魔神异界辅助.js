@@ -238,9 +238,10 @@ var jyqtsh = false;
 const VERSION_NAME = "2.7.1";
 const VERSION_CODE = 271;
 const VERSION_UPDATE_TIME = "2026-11-15";
-const VERSION_CHANGE_LOG = `1.更新源改为整包比对：不再使用 version.json 清单，直接下载整份脚本读取包内 VERSION_CODE 与本地比对，相同版本直接抛弃，手动检测弹窗询问，自动检测直接覆盖；下载地址 GitHub 原始文件优先、CDN 回退，每次启动只扫描一轮。
-2.更新时不保留旧脚本备份：写入前直接删除旧文件，不再生成 .bak，也不再做失败回滚；同时移除全部控制台日志输出。
-2.移除截图权限自检：初始化入口 initGameScript() 已申请屏幕投影权限，未授权直接退出，因此 colorProbeSlots() 内的 screenReady 探测与 ensureScreenCapture() 函数一并删除，不再重复取图确认。
+const VERSION_CHANGE_LOG = `1.检测更新改为整包比对：不再依赖 version.json 清单，直接下载整份脚本读取包内 VERSION_CODE 与本地比对，相同版本直接抛弃；手动检测弹窗询问，自动检测直接覆盖；下载地址 GitHub 原始文件优先、CDN 回退，每次启动只扫描一轮。
+2.更新保留备份与回滚：写入前把旧脚本备份为 .bak（临时脚本场景同样备份），写入失败或长度异常自动用备份回滚，更新成功后备份保留；确认没有新版本时清理历史遗留的 .bak。
+3.移除全部控制台日志输出。
+4.移除截图权限自检：初始化入口 initGameScript() 已申请屏幕投影权限，未授权直接退出，因此 colorProbeSlots() 内的 screenReady 探测与 ensureScreenCapture() 函数一并删除，不再重复取图确认。
 2.截图与媒体投影权限全脚本只在初始化入口申请一次，探测函数每次只取一张图做颜色统计。
 3.使用系统AI战斗策略（enableSystemAIBattle）限制三个函数入口：查看我方成员血量 checkOurTeamHp()、发起攻击 launchAttack()、点选卡牌 sendUserSelectCard()。
 4.发起攻击入口 launchAttack() 首行判断，开启时直接 return：不选卡牌、不点选敌方目标，攻击交给游戏系统AI。
@@ -254,9 +255,9 @@ const VERSION_CHANGE_LOG = `1.更新源改为整包比对：不再使用 version
 12.魔兽装备标记 isEquipPetFlag 初始值由 true 改为 false，脚本启动时不再假定魔兽已装备，手动进局遇怪时也能走装备流程；滑动分支内多余的置假语句已移除。
 13.新增全局标记 hasUnloadedPetOnFirstMapEnter，进入地图函数调用卸载前若为假，说明本轮还没卸载过魔兽，则先打标记并把 isEquipPetFlag 置真，保证首次进图能正常执行卸载、清掉上一轮残留。
 14.全军覆没/灵力耗尽处理流程同样按临时修改标记恢复开启系统AI战斗策略，并把标记清除，避免战败路径让策略长期处于关闭状态。
-15.新增自动更新：设置菜单新增"自动检测并下载更新"开关，开启后启动时后台静默检测并自动下载覆盖重启；主菜单新增"检测更新"，显示新版本号与更新日志并询问是否下载。
+15.新增自动更新：设置菜单新增"自动检测并下载更新"开关，开启后启动时后台静默检测并自动下载覆盖重启；主菜单新增"检测更新"，显示新版本号与更新日志并询问是否下载。两者共用同一个检测更新函数，自动更新以 silent 参数调用，不弹询问框。
 16.修复更新后重启失败：不再删除正在运行的脚本文件，改为直接覆盖写入；脚本运行于缓存临时文件时，改为写入固定路径 /sdcard/msyj-helper/ 并重启该路径。
-16.本版本为更新链路测试版，功能与 2.6.9 完全一致。
+17.更新源简化为只保留脚本文件：不再使用 version.json 清单，检测更新时直接下载整份脚本读取 VERSION_CODE 比对；相同版本直接抛弃，手动检测弹窗询问，静默检测直接覆盖。
 `;
 // 自动更新源：公共仓库地址，格式为 "用户名/仓库名@分支"，留空则关闭更新功能
 const UPDATE_REPO = "zhxlmzhx/msyj-helper@main";
@@ -1653,7 +1654,7 @@ if (!runFlag)
 {
 exit();
 }
-// 自动更新在主菜单显示完成后执行：主线程内单次扫描，取到数据即处理
+// 自动更新在主菜单显示完成后执行：主线程内单次扫描，避免后台线程里 http 挂起导致静默无响应
 if (enableAutoUpdate)
 {
 manualCheckUpdate(true);
@@ -1687,10 +1688,10 @@ function buildNoCacheOptions()
 return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } };
 }
 // 生成候选下载地址：清单自带地址 → CDN → GitHub 原始文件
-// 生成候选下载地址：GitHub 原始文件优先，CDN 作回退
 function buildUpdateUrls(base, rawBase, stamp)
 {
 var encodedName = encodeURIComponent(UPDATE_SCRIPT_NAME);
+// 原始文件优先（权威、更新及时），CDN 仅作回退：CDN 边缘缓存可能长期返回旧构建
 var urls = [];
 if (rawBase)
 {
@@ -1702,7 +1703,7 @@ urls.push(base + encodedName + stamp);
 }
 return urls;
 }
-// 下载更新包字节；失败返回 null
+// 读取脚本内声明的版本号，用于 MD5 与清单不一致时的内容兜底判定
 function readScriptText(bytes)
 {
 try
@@ -1748,6 +1749,7 @@ return hit[1];
 }
 return "";
 }
+// 下载更新包字节；失败返回 null
 function downloadUpdateBytes(url)
 {
 try
@@ -1764,8 +1766,8 @@ catch (e)
 return null;
 }
 }
-// 拉取远端版本清单：成功返回 { manifest, base, stamp }，失败返回 { error }
-// 单次扫描远端脚本：依次尝试候选地址，拿到第一份可解析出 VERSION_CODE 的脚本即返回
+// 直接下载远端整份脚本，取版本号最高的一份；失败返回 null
+// 单次扫描远端脚本：按候选地址依次尝试一遍，拿到第一份可解析的脚本就返回（一次启动只扫一轮）
 function fetchRemoteScript()
 {
 var repoInfo = parseUpdateRepo();
@@ -1789,14 +1791,19 @@ if (code <= 0)
 {
 continue;
 }
-return { bytes: bytes, code: code, name: readScriptVersionName(bytes) || String(code), changeLog: readScriptChangeLog(bytes) };
+return { bytes: bytes, code: code, name: readScriptVersionName(bytes) || String(code), changeLog: readScriptChangeLog(bytes), url: urls[i] };
 }
 return null;
 }
 // 主菜单手动检测更新：显示新版本号与更新日志，询问是否下载
-// 检测更新：下载整份脚本比对版本号；silent 为真表示自动更新，有新版本不询问直接覆盖
+// 主菜单手动检测更新：下载整份脚本比对版本号，有新版本才弹窗询问
+// 检测更新：直接下载整份脚本比对版本号；silent 为真表示自动更新，找到新版本不询问直接覆盖
 function manualCheckUpdate(silent)
 {
+if (!silent)
+{
+toast("正在检测更新，请稍后");
+}
 var remote = fetchRemoteScript();
 if (!remote)
 {
@@ -1808,6 +1815,7 @@ return false;
 }
 if (remote.code <= VERSION_CODE)
 {
+removeUpdateBackup();
 if (!silent)
 {
 toast("已是最新版本 " + VERSION_NAME);
@@ -1825,13 +1833,47 @@ return false;
 }
 return installUpdate(remote.bytes, remote.name, false);
 }
-// 启动后台静默检测：有新版本则自动下载覆盖并重启，全程不弹窗
 
-// 下载更新包、校验 MD5 后替换脚本
-
-// 计算字节数组的 MD5
 
 // 覆盖当前脚本并重启自身
+// 回滚：用备份覆盖回目标脚本
+function restoreUpdateBackup(targetPath, bakPath)
+{
+try
+{
+if (files.exists(bakPath))
+{
+files.copy(bakPath, targetPath);
+}
+}
+catch (e)
+{
+}
+}
+// 确认没有新版本时，清掉历史遗留的备份文件
+function removeUpdateBackup()
+{
+var selfPath = String(engines.myEngine().getSource() || "");
+var bakPaths = [];
+if (selfPath && selfPath.indexOf(".js") >= 0)
+{
+bakPaths.push(selfPath + ".bak");
+}
+bakPaths.push(files.getSdcardPath() + "/msyj-helper/" + UPDATE_SCRIPT_NAME + ".bak");
+for (var i = 0; i < bakPaths.length; i++)
+{
+try
+{
+if (files.exists(bakPaths[i]))
+{
+files.remove(bakPaths[i]);
+}
+}
+catch (e)
+{
+}
+}
+}
 function installUpdate(bytes, newVersion, silent)
 {
 var selfPath = String(engines.myEngine().getSource() || "");
@@ -1852,20 +1894,25 @@ var stableDir = files.getSdcardPath() + "/msyj-helper/";
 files.ensureDir(stableDir);
 targetPath = stableDir + UPDATE_SCRIPT_NAME;
 }
-// 不保留旧脚本备份：旧文件直接删除，再写入新内容
+var bakPath = targetPath + ".bak";
 try
 {
 if (files.exists(targetPath))
 {
-files.remove(targetPath);
+if (files.exists(bakPath))
+{
+files.remove(bakPath);
+}
+files.copy(targetPath, bakPath);
 }
 files.writeBytes(targetPath, bytes);
 }
 catch (e)
 {
+restoreUpdateBackup(targetPath, bakPath);
 if (!silent)
 {
-toast("写入脚本失败，已终止更新：" + e);
+toast("写入脚本失败，已回滚到旧版本：" + e);
 }
 return false;
 }
@@ -1880,14 +1927,14 @@ return false;
 var written = files.readBytes(targetPath);
 if (!written || written.length !== bytes.length)
 {
+restoreUpdateBackup(targetPath, bakPath);
 if (!silent)
 {
-toast("更新文件长度异常，已终止更新");
+toast("更新文件长度异常，已回滚到旧版本");
 }
 return false;
 }
 toast("已更新到 " + newVersion + "，正在重启脚本");
-sleep(600);
 try
 {
 engines.all().forEach(function (e)
@@ -1901,7 +1948,6 @@ e.forceStop();
 catch (e)
 {
 }
-sleep(300);
 try
 {
 engines.execScriptFile(targetPath);
@@ -1912,8 +1958,16 @@ if (!silent)
 {
 toast("重启脚本失败，请手动运行：" + targetPath);
 }
+exit();
+return false;
 }
-sleep(400);
+try
+{
+engines.myEngine().forceStop();
+}
+catch (e)
+{
+}
 exit();
 return true;
 }
