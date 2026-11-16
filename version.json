@@ -1,8 +1,0 @@
-{
-  "versionName": "2.7.0",
-  "versionCode": 270,
-  "url": "https://cdn.jsdelivr.net/gh/zhxlmzhx/msyj-helper@main/魔神异界辅助.js",
-  "md5": "15235ea5f4bd4cf89a3d9ef87932e097",
-  "force": false,
-  "note": "1.设置菜单的自动检测并下载更新开关移到开关分类最后一项（模式之前）。2.更新包下载多源回退：清单地址、jsDelivr、GitHub 原始文件依次尝试。3.修复校验失败：MD5 不符时读取脚本内 VERSION_CODE，与清单一致则按内容放行。4.修复重启 ENOENT：不再删除运行中的脚本，改为直接覆盖写入；临时脚本改写入 /sdcard/msyj-helper/ 并重启该路径。5.本版本为更新链路测试版，功能与 2.6.9 完全一致。"
-}
