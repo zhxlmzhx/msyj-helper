@@ -235,10 +235,11 @@ var selectedDungeonIndex = 0;
 var enableTianGangBlast = false;
 var tianGangEndTime = 0;
 var jyqtsh = false;
-const VERSION_NAME = "2.7.4";
-const VERSION_CODE = 274;
+const VERSION_NAME = "2.7.5";
+const VERSION_CODE = 275;
 const VERSION_UPDATE_TIME = "2026-11-17";
-const VERSION_CHANGE_LOG = `1.更新地址固定为镜像 gh-proxy.com，不再尝试 GitHub 原始域名与其他镜像，避免手机仅解析到 IPv6 时反复失败。
+const VERSION_CHANGE_LOG = `1.主地址直连改走 IPv4：先解析 A 记录再连 IP，配合 SNI 与 HTTPS 主机名校验，证书仍按 raw.githubusercontent.com 校验，不放弃安全性；连不上时依次回退 Java 默认连接与 gh-proxy.com 镜像。
+2.更新地址固定为镜像 gh-proxy.com，不再尝试 GitHub 原始域名与其他镜像，避免手机仅解析到 IPv6 时反复失败。
 2.更新地址增加镜像兜底：原始地址连不上时（例如手机只解析到 IPv6）自动依次尝试 ghproxy.net、gh-proxy.com、ghfast.top，仍失败才提示检测失败。
 2.更新下载增加兜底通道：先用 AutoJs 的 http 拉取，失败再改用 Java 连接读取；两路都失败时把具体原因（http 状态/异常信息）显示在提示里，便于排查网络问题。
 2.检测更新改为整包比对：不再依赖 version.json 清单，直接下载整份脚本读取包内 VERSION_CODE 与本地比对，相同版本直接抛弃；手动检测弹窗询问，自动检测直接覆盖；更新地址只保留 GitHub 原始文件一个（jsDelivr 按路径缓存、刷新不可控，已弃用），每次启动只扫描一轮。
@@ -1695,11 +1696,15 @@ return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } };
 // 只使用 GitHub 原始文件地址：数据权威、无边缘缓存；jsDelivr 按路径缓存且刷新不可控，已弃用
 // 生成候选下载地址：GitHub 原始地址优先，镜像代理兜底（手机只解析到 IPv6 时原始地址会连不上）
 // 只使用镜像地址 gh-proxy.com 下载脚本：GitHub 原始域名在部分手机上只解析到 IPv6 导致连不上
+// 生成候选下载地址：GitHub 原始地址优先，镜像 gh-proxy.com 作为最后兜底
 function buildUpdateUrls(repoInfo, stamp)
 {
 var encodedName = encodeURIComponent(UPDATE_SCRIPT_NAME);
 var path = repoInfo.repoPath + "/" + repoInfo.branch + "/" + encodedName;
-return ["https://gh-proxy.com/https://raw.githubusercontent.com/" + path + stamp];
+return [
+"https://raw.githubusercontent.com/" + path + stamp,
+"https://gh-proxy.com/https://raw.githubusercontent.com/" + path + stamp
+];
 }
 // 读取脚本内声明的版本号，用于 MD5 与清单不一致时的内容兜底判定
 function readScriptText(bytes)
@@ -1756,6 +1761,11 @@ if (bytes && bytes.length > 0)
 {
 return bytes;
 }
+bytes = downloadByIpv4(url);
+if (bytes && bytes.length > 0)
+{
+return bytes;
+}
 return downloadByJava(url);
 }
 function downloadByHttp(url)
@@ -1776,6 +1786,135 @@ catch (e)
 lastUpdateError = "http 异常：" + e;
 return null;
 }
+}
+// 强制 IPv4 直连：解析 A 记录后连 IP，但用 SNI + HTTPS 主机名校验，证书仍按域名验证
+function downloadByIpv4(rawUrl)
+{
+try
+{
+var uri = new java.net.URL(rawUrl);
+var host = String(uri.getHost());
+var file = String(uri.getFile());
+var addrs = java.net.InetAddress.getAllByName(host);
+var ips = [];
+for (var i = 0; i < addrs.length; i++)
+{
+if (addrs[i] instanceof java.net.Inet4Address)
+{
+ips.push(addrs[i]);
+}
+}
+if (ips.length <= 0)
+{
+lastUpdateError = "DNS 无 IPv4 记录";
+return null;
+}
+for (var k = 0; k < ips.length; k++)
+{
+var bytes = requestOverIpv4(host, ips[k], file);
+if (bytes && bytes.length > 0)
+{
+return bytes;
+}
+}
+return null;
+}
+catch (e)
+{
+lastUpdateError = "IPv4 直连异常：" + e;
+return null;
+}
+}
+function requestOverIpv4(host, ip, file)
+{
+try
+{
+var ctx = javax.net.ssl.SSLContext.getDefault();
+var socket = ctx.getSocketFactory().createSocket();
+var params = socket.getSSLParameters();
+params.setEndpointIdentificationAlgorithm("HTTPS");
+var names = new java.util.ArrayList();
+names.add(new javax.net.ssl.SNIHostName(host));
+params.setServerNames(names);
+socket.setSSLParameters(params);
+socket.connect(new java.net.InetSocketAddress(ip, 443), 15000);
+socket.setSoTimeout(20000);
+var req = "GET " + file + " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n";
+var out = socket.getOutputStream();
+out.write(new java.lang.String(req).getBytes("UTF-8"));
+out.flush();
+var input = socket.getInputStream();
+var buffer = java.io.ByteArrayOutputStream();
+var chunk = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192);
+while (true)
+{
+var n = input.read(chunk);
+if (n < 0)
+{
+break;
+}
+buffer.write(chunk, 0, n);
+}
+input.close();
+socket.close();
+return extractHttpBody(buffer.toByteArray());
+}
+catch (e)
+{
+lastUpdateError = "IPv4 连接 " + ip.getHostAddress() + " 失败：" + e;
+return null;
+}
+}
+// 从原始响应里取正文，并处理 chunked 分块传输
+function extractHttpBody(raw)
+{
+try
+{
+var text = String(new java.lang.String(raw, "UTF-8"));
+var split = text.indexOf("\r\n\r\n");
+if (split < 0)
+{
+return null;
+}
+var head = text.substring(0, split).toLowerCase();
+var bodyText = text.substring(split + 4);
+if (head.indexOf("transfer-encoding: chunked") >= 0)
+{
+bodyText = decodeChunked(bodyText);
+}
+return new java.lang.String(bodyText).getBytes("UTF-8");
+}
+catch (e)
+{
+return null;
+}
+}
+function decodeChunked(bodyText)
+{
+var out = "";
+var pos = 0;
+while (true)
+{
+var lineEnd = bodyText.indexOf("\r\n", pos);
+if (lineEnd < 0)
+{
+break;
+}
+var sizeLine = bodyText.substring(pos, lineEnd);
+var semi = sizeLine.indexOf(";");
+if (semi >= 0)
+{
+sizeLine = sizeLine.substring(0, semi);
+}
+var size = parseInt(sizeLine, 16);
+if (isNaN(size) || size <= 0)
+{
+break;
+}
+out += bodyText.substring(lineEnd + 2, lineEnd + 2 + size);
+pos = lineEnd + 2 + size + 2;
+}
+return out;
 }
 function downloadByJava(url)
 {
