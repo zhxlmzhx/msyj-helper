@@ -235,10 +235,11 @@ var selectedDungeonIndex = 0;
 var enableTianGangBlast = false;
 var tianGangEndTime = 0;
 var jyqtsh = false;
-const VERSION_NAME = "2.7.5";
-const VERSION_CODE = 275;
+const VERSION_NAME = "2.7.0";
+const VERSION_CODE = 270;
 const VERSION_UPDATE_TIME = "2026-11-17";
-const VERSION_CHANGE_LOG = `1.主地址直连改走 IPv4：先解析 A 记录再连 IP，配合 SNI 与 HTTPS 主机名校验，证书仍按 raw.githubusercontent.com 校验，不放弃安全性；连不上时依次回退 Java 默认连接与 gh-proxy.com 镜像。
+const VERSION_CHANGE_LOG = `1.更新成功后直接删除备份文件：写入校验通过即 remove 掉 .bak，只在写入失败或长度异常时用备份回滚。
+2.主地址直连改走 IPv4：先解析 A 记录再连 IP，配合 SNI 与 HTTPS 主机名校验，证书仍按 raw.githubusercontent.com 校验，不放弃安全性；连不上时依次回退 Java 默认连接与 gh-proxy.com 镜像。
 2.更新地址固定为镜像 gh-proxy.com，不再尝试 GitHub 原始域名与其他镜像，避免手机仅解析到 IPv6 时反复失败。
 2.更新地址增加镜像兜底：原始地址连不上时（例如手机只解析到 IPv6）自动依次尝试 ghproxy.net、gh-proxy.com、ghfast.top，仍失败才提示检测失败。
 2.更新下载增加兜底通道：先用 AutoJs 的 http 拉取，失败再改用 Java 连接读取；两路都失败时把具体原因（http 状态/异常信息）显示在提示里，便于排查网络问题。
@@ -2118,6 +2119,17 @@ if (!silent)
 toast("更新文件长度异常，已回滚到旧版本");
 }
 return false;
+}
+// 更新成功：删除备份，不再保留旧脚本
+try
+{
+if (files.exists(bakPath))
+{
+files.remove(bakPath);
+}
+}
+catch (e)
+{
 }
 toast("已更新到 " + newVersion + "，正在重启脚本");
 try
