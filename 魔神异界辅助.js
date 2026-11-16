@@ -1647,15 +1647,18 @@ else
 {
 applyConfig(cfg);
 }
-// 自动更新在主菜单展示之前同步执行：先完成检测与覆盖重启，再决定显示哪个版本的主菜单
-if (enableAutoUpdate)
-{
-manualCheckUpdate(true);
-}
 let runFlag = showMainMenu();
 if (!runFlag)
 {
 exit();
+}
+// 自动更新在主菜单展示之后异步执行：不阻塞菜单，单次扫描，取到数据就处理
+if (enableAutoUpdate)
+{
+threads.start(function ()
+{
+manualCheckUpdate(true);
+});
 }
 initGameScript();
 // 解析更新源配置，拆出仓库路径与分支
@@ -1683,7 +1686,7 @@ return { repoPath: repoPath, branch: branch };
 // 统一使用不缓存的请求头，降低 CDN 旧缓存命中概率
 function buildNoCacheOptions()
 {
-return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" }, timeout: 8000 };
+return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } };
 }
 // 生成候选下载地址：清单自带地址 → CDN → GitHub 原始文件
 function buildUpdateUrls(base, rawBase, stamp)
@@ -1765,6 +1768,7 @@ return null;
 }
 }
 // 直接下载远端整份脚本，取版本号最高的一份；失败返回 null
+// 单次扫描远端脚本：按候选地址依次尝试一遍，拿到第一份可解析的脚本就返回（一次启动只扫一轮）
 function fetchRemoteScript()
 {
 var repoInfo = parseUpdateRepo();
@@ -1776,7 +1780,6 @@ var base = "https://cdn.jsdelivr.net/gh/" + repoInfo.repoPath + "@" + repoInfo.b
 var rawBase = "https://raw.githubusercontent.com/" + repoInfo.repoPath + "/" + repoInfo.branch + "/";
 var stamp = "?t=" + Date.now();
 var urls = buildUpdateUrls(base, rawBase, stamp);
-var best = null;
 for (var i = 0; i < urls.length; i++)
 {
 var bytes = downloadUpdateBytes(urls[i]);
@@ -1789,14 +1792,9 @@ if (code <= 0)
 {
 continue;
 }
-var name = readScriptVersionName(bytes) || String(code);
-var changeLog = readScriptChangeLog(bytes);
-if (!best || code > best.code)
-{
-best = { bytes: bytes, code: code, name: name, changeLog: changeLog, url: urls[i] };
+return { bytes: bytes, code: code, name: readScriptVersionName(bytes) || String(code), changeLog: readScriptChangeLog(bytes), url: urls[i] };
 }
-}
-return best;
+return null;
 }
 // 主菜单手动检测更新：显示新版本号与更新日志，询问是否下载
 // 主菜单手动检测更新：下载整份脚本比对版本号，有新版本才弹窗询问
