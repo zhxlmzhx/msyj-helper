@@ -1765,7 +1765,6 @@ catch (e)
 return null;
 }
 }
-// 拉取远端版本清单：成功返回 { manifest, base, stamp }，失败返回 { error }
 // 直接下载远端整份脚本，取版本号最高的一份；失败返回 null
 function fetchRemoteScript()
 {
@@ -1840,20 +1839,6 @@ installUpdate(remote.bytes, remote.name, true);
 }
 // 下载更新包、校验 MD5 后替换脚本
 
-// 计算字节数组的 MD5
-function md5Hex(bytes)
-{
-var md = java.security.MessageDigest.getInstance("MD5");
-md.update(bytes);
-var d = md.digest();
-var s = "";
-for (var i = 0; i < d.length; i++)
-{
-var v = (d[i] & 0xff).toString(16);
-s += v.length === 1 ? "0" + v : v;
-}
-return s;
-}
 // 覆盖当前脚本并重启自身
 function installUpdate(bytes, newVersion, silent)
 {
