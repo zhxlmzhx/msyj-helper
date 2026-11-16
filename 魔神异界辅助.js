@@ -1691,14 +1691,15 @@ return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } };
 function buildUpdateUrls(base, rawBase, stamp)
 {
 var encodedName = encodeURIComponent(UPDATE_SCRIPT_NAME);
+// 原始文件优先（权威、更新及时），CDN 仅作回退：CDN 边缘缓存可能长期返回旧构建
 var urls = [];
-if (base)
-{
-urls.push(base + encodedName + stamp);
-}
 if (rawBase)
 {
 urls.push(rawBase + encodedName + stamp);
+}
+if (base)
+{
+urls.push(base + encodedName + stamp);
 }
 return urls;
 }
