@@ -235,10 +235,12 @@ var selectedDungeonIndex = 0;
 var enableTianGangBlast = false;
 var tianGangEndTime = 0;
 var jyqtsh = false;
-const VERSION_NAME = "2.7.0";
-const VERSION_CODE = 270;
+const VERSION_NAME = "2.7.1";
+const VERSION_CODE = 271;
 const VERSION_UPDATE_TIME = "2026-11-17";
-const VERSION_CHANGE_LOG = `1.静默检测更新移到主菜单循环内：进入循环时先检测一次，用 hasSilentUpdateChecked 标记，跑完菜单再次回到主菜单不再重复扫描。
+const VERSION_CHANGE_LOG = `1.更新请求全部加短超时：http 5 秒、IPv4 直连 4/7 秒、Java 4/7 秒，单地址总耗时超过 12 秒不再尝试后续通道，避免 IPv6 不可达时长时间卡在主菜单前。
+2.静默模式下检测失败也弹提示（原先完全无输出，无法判断是没触发还是下载失败）。
+3.静默检测更新移到主菜单循环内：进入循环时先检测一次，用 hasSilentUpdateChecked 标记，跑完菜单再次回到主菜单不再重复扫描。
 2.更新成功后直接删除备份文件：写入校验通过即 remove 掉 .bak，只在写入失败或长度异常时用备份回滚。
 2.主地址直连改走 IPv4：先解析 A 记录再连 IP，配合 SNI 与 HTTPS 主机名校验，证书仍按 raw.githubusercontent.com 校验，不放弃安全性；连不上时依次回退 Java 默认连接与 gh-proxy.com 镜像。
 2.更新地址固定为镜像 gh-proxy.com，不再尝试 GitHub 原始域名与其他镜像，避免手机仅解析到 IPv6 时反复失败。
@@ -1698,7 +1700,7 @@ return { repoPath: repoPath, branch: branch };
 // 统一使用不缓存的请求头，降低 CDN 旧缓存命中概率
 function buildNoCacheOptions()
 {
-return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } };
+return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" }, timeout: 5000 };
 }
 // 生成候选下载地址：清单自带地址 → CDN → GitHub 原始文件
 // 只使用 GitHub 原始文件地址：数据权威、无边缘缓存；jsDelivr 按路径缓存且刷新不可控，已弃用
@@ -1764,15 +1766,23 @@ return "";
 // 下载更新包字节：先走 AutoJs 的 http，失败再用 Java 连接兜底，失败原因记录到 lastUpdateError
 function downloadUpdateBytes(url)
 {
+var startTime = Date.now();
 var bytes = downloadByHttp(url);
 if (bytes && bytes.length > 0)
 {
 return bytes;
 }
+if (Date.now() - startTime <= 6000)
+{
 bytes = downloadByIpv4(url);
 if (bytes && bytes.length > 0)
 {
 return bytes;
+}
+}
+if (Date.now() - startTime > 12000)
+{
+return null;
 }
 return downloadByJava(url);
 }
@@ -1845,8 +1855,8 @@ var names = new java.util.ArrayList();
 names.add(new javax.net.ssl.SNIHostName(host));
 params.setServerNames(names);
 socket.setSSLParameters(params);
-socket.connect(new java.net.InetSocketAddress(ip, 443), 15000);
-socket.setSoTimeout(20000);
+socket.connect(new java.net.InetSocketAddress(ip, 443), 4000);
+socket.setSoTimeout(7000);
 var req = "GET " + file + " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n";
 var out = socket.getOutputStream();
 out.write(new java.lang.String(req).getBytes("UTF-8"));
@@ -1929,8 +1939,8 @@ function downloadByJava(url)
 try
 {
 var conn = new java.net.URL(url).openConnection();
-conn.setConnectTimeout(15000);
-conn.setReadTimeout(20000);
+conn.setConnectTimeout(4000);
+conn.setReadTimeout(7000);
 conn.setRequestProperty("User-Agent", "Mozilla/5.0");
 conn.setRequestProperty("Cache-Control", "no-cache");
 var code = conn.getResponseCode();
@@ -2000,10 +2010,7 @@ toast("正在检测更新，请稍后");
 var remote = fetchRemoteScript();
 if (!remote)
 {
-if (!silent)
-{
-toast("检测更新失败：" + (lastUpdateError || "无法获取远端脚本"));
-}
+toast((silent ? "静默更新失败：" : "检测更新失败：") + (lastUpdateError || "无法获取远端脚本"));
 return false;
 }
 if (remote.code <= VERSION_CODE)
