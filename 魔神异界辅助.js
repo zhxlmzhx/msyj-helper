@@ -1647,15 +1647,15 @@ else
 {
 applyConfig(cfg);
 }
+// 自动更新在主菜单展示之前同步执行：先完成检测与覆盖重启，再决定显示哪个版本的主菜单
+if (enableAutoUpdate)
+{
+manualCheckUpdate(true);
+}
 let runFlag = showMainMenu();
 if (!runFlag)
 {
 exit();
-}
-// 自动更新在进入游戏初始化前同步执行：避免线程内检测被打断，也避免先初始化再重启
-if (enableAutoUpdate)
-{
-manualCheckUpdate(true);
 }
 initGameScript();
 // 解析更新源配置，拆出仓库路径与分支
