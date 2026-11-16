@@ -253,7 +253,8 @@ const VERSION_CHANGE_LOG = `1.移除截图权限自检：初始化入口 initGam
 13.新增全局标记 hasUnloadedPetOnFirstMapEnter，进入地图函数调用卸载前若为假，说明本轮还没卸载过魔兽，则先打标记并把 isEquipPetFlag 置真，保证首次进图能正常执行卸载、清掉上一轮残留。
 14.全军覆没/灵力耗尽处理流程同样按临时修改标记恢复开启系统AI战斗策略，并把标记清除，避免战败路径让策略长期处于关闭状态。
 15.新增自动更新：设置菜单新增"自动检测并下载更新"开关，开启后启动时后台静默检测并自动下载覆盖重启；主菜单新增"检测更新"，显示新版本号与更新日志并询问是否下载。
-16.本版本为更新链路测试版，功能与 2.6.9 完全一致，仅版本号不同。
+16.修复更新后重启失败：不再删除正在运行的脚本文件，改为直接覆盖写入；脚本运行于缓存临时文件时，改为写入固定路径 /sdcard/msyj-helper/ 并重启该路径。
+16.本版本为更新链路测试版，功能与 2.6.9 完全一致。
 `;
 // 自动更新源：公共仓库地址，格式为 "用户名/仓库名@分支"，留空则关闭更新功能
 const UPDATE_REPO = "zhxlmzhx/msyj-helper@main";
@@ -1888,7 +1889,7 @@ return s;
 // 覆盖当前脚本并重启自身
 function installUpdate(bytes, newVersion, silent)
 {
-var selfPath = String(engines.myEngine().getSource());
+var selfPath = String(engines.myEngine().getSource() || "");
 if (!selfPath || selfPath.indexOf(".js") < 0)
 {
 if (!silent)
@@ -1897,41 +1898,35 @@ toast("无法定位当前脚本路径，更新已放弃");
 }
 return false;
 }
-var tmpPath = selfPath + ".new";
-var bakPath = selfPath + ".bak";
+// 缓存目录下的临时脚本会被 AutoJs 回收，改用固定路径承接更新
+var isTempScript = selfPath.indexOf("/cache/tmp-scripts/") >= 0;
+var targetPath = selfPath;
+if (isTempScript)
+{
+var stableDir = files.getSdcardPath() + "/msyj-helper/";
+files.ensureDir(stableDir);
+targetPath = stableDir + UPDATE_SCRIPT_NAME;
+}
+var bakPath = targetPath + ".bak";
 try
 {
-files.writeBytes(tmpPath, bytes);
-}
-catch (e)
-{
-if (!silent)
-{
-toast("写入更新文件失败：" + e);
-}
-return false;
-}
-try
+if (files.exists(targetPath) && !isTempScript)
 {
 if (files.exists(bakPath))
 {
 files.remove(bakPath);
 }
-files.copy(selfPath, bakPath);
-files.remove(selfPath);
-files.rename(tmpPath, selfPath);
+files.copy(targetPath, bakPath);
+}
+files.writeBytes(targetPath, bytes);
 }
 catch (e)
 {
 try
 {
-if (files.exists(tmpPath))
+if (!isTempScript && files.exists(bakPath))
 {
-files.remove(tmpPath);
-}
-if (!files.exists(selfPath) && files.exists(bakPath))
-{
-files.rename(bakPath, selfPath);
+files.copy(bakPath, targetPath);
 }
 }
 catch (err)
@@ -1939,7 +1934,24 @@ catch (err)
 }
 if (!silent)
 {
-toast("替换脚本失败，已回滚：" + e);
+toast("写入脚本失败，已终止更新：" + e);
+}
+return false;
+}
+if (!files.exists(targetPath))
+{
+if (!silent)
+{
+toast("更新写入后文件不存在，已终止更新");
+}
+return false;
+}
+var written = files.readBytes(targetPath);
+if (!written || written.length !== bytes.length)
+{
+if (!silent)
+{
+toast("更新文件长度异常，已终止更新");
 }
 return false;
 }
@@ -1959,8 +1971,18 @@ catch (e)
 {
 }
 sleep(300);
-engines.execScriptFile(selfPath);
-sleep(300);
+try
+{
+engines.execScriptFile(targetPath);
+}
+catch (e)
+{
+if (!silent)
+{
+toast("重启脚本失败，请手动运行：" + targetPath);
+}
+}
+sleep(400);
 exit();
 return true;
 }
