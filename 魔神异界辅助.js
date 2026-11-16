@@ -1719,7 +1719,7 @@ function readScriptVersionCode(bytes)
 {
 try
 {
-var text = new java.lang.String(bytes, "UTF-8");
+var text = String(new java.lang.String(bytes, "UTF-8"));
 var hit = text.match(/VERSION_CODE\s*=\s*(\d+)/);
 if (hit && hit[1])
 {
