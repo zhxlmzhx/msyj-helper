@@ -235,10 +235,11 @@ var selectedDungeonIndex = 0;
 var enableTianGangBlast = false;
 var tianGangEndTime = 0;
 var jyqtsh = false;
-const VERSION_NAME = "2.7.1";
-const VERSION_CODE = 271;
+const VERSION_NAME = "2.7.2";
+const VERSION_CODE = 272;
 const VERSION_UPDATE_TIME = "2026-11-15";
-const VERSION_CHANGE_LOG = `1.检测更新改为整包比对：不再依赖 version.json 清单，直接下载整份脚本读取包内 VERSION_CODE 与本地比对，相同版本直接抛弃；手动检测弹窗询问，自动检测直接覆盖；更新地址只保留 GitHub 原始文件一个（jsDelivr 按路径缓存、刷新不可控，已弃用），每次启动只扫描一轮。
+const VERSION_CHANGE_LOG = `1.更新下载增加兜底通道：先用 AutoJs 的 http 拉取，失败再改用 Java 连接读取；两路都失败时把具体原因（http 状态/异常信息）显示在提示里，便于排查网络问题。
+2.检测更新改为整包比对：不再依赖 version.json 清单，直接下载整份脚本读取包内 VERSION_CODE 与本地比对，相同版本直接抛弃；手动检测弹窗询问，自动检测直接覆盖；更新地址只保留 GitHub 原始文件一个（jsDelivr 按路径缓存、刷新不可控，已弃用），每次启动只扫描一轮。
 2.更新保留备份与回滚：写入前把旧脚本备份为 .bak（临时脚本场景同样备份），写入失败或长度异常自动用备份回滚，更新成功后备份保留；确认没有新版本时清理历史遗留的 .bak。
 3.移除全部控制台日志输出。
 4.移除截图权限自检：初始化入口 initGameScript() 已申请屏幕投影权限，未授权直接退出，因此 colorProbeSlots() 内的 screenReady 探测与 ensureScreenCapture() 函数一并删除，不再重复取图确认。
@@ -262,6 +263,7 @@ const VERSION_CHANGE_LOG = `1.检测更新改为整包比对：不再依赖 vers
 // 自动更新源：公共仓库地址，格式为 "用户名/仓库名@分支"，留空则关闭更新功能
 const UPDATE_REPO = "zhxlmzhx/msyj-helper@main";
 const UPDATE_SCRIPT_NAME = "魔神异界辅助.js";
+var lastUpdateError = "";
 const DEFAULT_CONFIG = {
 teamMode: 0,
 CARD_COUNT: 2,
@@ -1740,19 +1742,69 @@ return hit[1];
 return "";
 }
 // 下载更新包字节；失败返回 null
+// 下载更新包字节：先走 AutoJs 的 http，失败再用 Java 连接兜底，失败原因记录到 lastUpdateError
 function downloadUpdateBytes(url)
+{
+var bytes = downloadByHttp(url);
+if (bytes && bytes.length > 0)
+{
+return bytes;
+}
+return downloadByJava(url);
+}
+function downloadByHttp(url)
 {
 try
 {
 var resp = http.get(url, buildNoCacheOptions());
 if (!resp || resp.statusCode !== 200)
 {
+lastUpdateError = "http 状态 " + (resp ? resp.statusCode : "无响应");
 return null;
 }
-return resp.body.bytes();
+var b = resp.body.bytes();
+return b && b.length > 0 ? b : null;
 }
 catch (e)
 {
+lastUpdateError = "http 异常：" + e;
+return null;
+}
+}
+function downloadByJava(url)
+{
+try
+{
+var conn = new java.net.URL(url).openConnection();
+conn.setConnectTimeout(15000);
+conn.setReadTimeout(20000);
+conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+conn.setRequestProperty("Cache-Control", "no-cache");
+var code = conn.getResponseCode();
+if (code !== 200)
+{
+lastUpdateError = "java 状态 " + code;
+return null;
+}
+var input = conn.getInputStream();
+var buffer = java.io.ByteArrayOutputStream();
+var chunk = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192);
+while (true)
+{
+var n = input.read(chunk);
+if (n < 0)
+{
+break;
+}
+buffer.write(chunk, 0, n);
+}
+input.close();
+var bytes = buffer.toByteArray();
+return bytes && bytes.length > 0 ? bytes : null;
+}
+catch (e)
+{
+lastUpdateError = "java 异常：" + e;
 return null;
 }
 }
@@ -1798,7 +1850,7 @@ if (!remote)
 {
 if (!silent)
 {
-toast("检测更新失败，请检查网络或更新源配置");
+toast("检测更新失败：" + (lastUpdateError || "无法获取远端脚本"));
 }
 return false;
 }
