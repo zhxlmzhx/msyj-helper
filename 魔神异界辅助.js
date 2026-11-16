@@ -235,10 +235,11 @@ var selectedDungeonIndex = 0;
 var enableTianGangBlast = false;
 var tianGangEndTime = 0;
 var jyqtsh = false;
-const VERSION_NAME = "2.7.5";
-const VERSION_CODE = 275;
+const VERSION_NAME = "2.7.6";
+const VERSION_CODE = 276;
 const VERSION_UPDATE_TIME = "2026-11-17";
-const VERSION_CHANGE_LOG = `1.更新逻辑恢复为直接调用：菜单循环内确认开关开启且未打标记后，同步执行一次 manualCheckUpdate(true)，移除后台线程与超时等待。
+const VERSION_CHANGE_LOG = `1.静默检测更新移回初始化入口之前：主菜单返回后、initGameScript() 之前判断开关与标记，符合就执行一次。
+2.更新逻辑恢复为直接调用：菜单循环内确认开关开启且未打标记后，同步执行一次 manualCheckUpdate(true)，移除后台线程与超时等待。
 2.静默更新改为菜单弹出后由后台线程执行：主菜单循环打标记后只启动 threads.start，主线程继续弹菜单，不再等待下载结果。
 2.静默更新改为子线程下载加 10 秒限时等待：下载卡住时不再阻塞主菜单，超时直接提示并跳过本次；下载成功后的写入与重启仍回到主线程执行。
 2.主菜单循环内改为先判断自动更新开关与更新标记：开关开启且未标记时，才打标记并执行静默更新。
@@ -1612,12 +1613,6 @@ function showMainMenu()
 // 菜单循环：反复显示主菜单并分发用户选择，返回跑图后退出
 while (true)
 {
-// 静默检测更新：菜单弹出后先看开关是否开启、本轮是否已打标记，都符合就打标记并调用一次更新
-if (enableAutoUpdate && !hasSilentUpdateChecked)
-{
-hasSilentUpdateChecked = true;
-manualCheckUpdate(true);
-}
 let select = dialogs.select("主菜单", [
 "跑图/刷怪",
 "签到",
@@ -1676,6 +1671,12 @@ let runFlag = showMainMenu();
 if (!runFlag)
 {
 exit();
+}
+// 初始化入口之前做一次静默更新检测：开关开启且本轮未打标记才执行
+if (enableAutoUpdate && !hasSilentUpdateChecked)
+{
+hasSilentUpdateChecked = true;
+manualCheckUpdate(true);
 }
 initGameScript();
 // 解析更新源配置，拆出仓库路径与分支
