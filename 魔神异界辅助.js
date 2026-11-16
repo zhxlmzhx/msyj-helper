@@ -235,10 +235,11 @@ var selectedDungeonIndex = 0;
 var enableTianGangBlast = false;
 var tianGangEndTime = 0;
 var jyqtsh = false;
-const VERSION_NAME = "2.7.1";
-const VERSION_CODE = 271;
+const VERSION_NAME = "2.7.2";
+const VERSION_CODE = 272;
 const VERSION_UPDATE_TIME = "2026-11-17";
-const VERSION_CHANGE_LOG = `1.更新请求全部加短超时：http 5 秒、IPv4 直连 4/7 秒、Java 4/7 秒，单地址总耗时超过 12 秒不再尝试后续通道，避免 IPv6 不可达时长时间卡在主菜单前。
+const VERSION_CHANGE_LOG = `1.主菜单循环内改为先判断自动更新开关与更新标记：开关开启且未标记时，才打标记并执行静默更新。
+2.更新请求全部加短超时：http 5 秒、IPv4 直连 4/7 秒、Java 4/7 秒，单地址总耗时超过 12 秒不再尝试后续通道，避免 IPv6 不可达时长时间卡在主菜单前。
 2.静默模式下检测失败也弹提示（原先完全无输出，无法判断是没触发还是下载失败）。
 3.静默检测更新移到主菜单循环内：进入循环时先检测一次，用 hasSilentUpdateChecked 标记，跑完菜单再次回到主菜单不再重复扫描。
 2.更新成功后直接删除备份文件：写入校验通过即 remove 掉 .bak，只在写入失败或长度异常时用备份回滚。
@@ -1606,14 +1607,11 @@ function showMainMenu()
 // 菜单循环：反复显示主菜单并分发用户选择，返回跑图后退出
 while (true)
 {
-// 静默检测更新：只在循环首次进入时执行一次，后续返回菜单不再重复扫描
-if (!hasSilentUpdateChecked)
+// 静默检测更新：开关开启且本轮尚未打过标记时，打标记并执行一次，之后返回菜单不再重复扫描
+if (enableAutoUpdate && !hasSilentUpdateChecked)
 {
 hasSilentUpdateChecked = true;
-if (enableAutoUpdate)
-{
 manualCheckUpdate(true);
-}
 }
 let select = dialogs.select("主菜单", [
 "跑图/刷怪",
