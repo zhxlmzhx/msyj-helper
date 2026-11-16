@@ -235,8 +235,8 @@ var selectedDungeonIndex = 0;
 var enableTianGangBlast = false;
 var tianGangEndTime = 0;
 var jyqtsh = false;
-const VERSION_NAME = "2.69";
-const VERSION_CODE = 269;
+const VERSION_NAME = "2.7.0";
+const VERSION_CODE = 270;
 const VERSION_UPDATE_TIME = "2026-11-15";
 const VERSION_CHANGE_LOG = `1.移除截图权限自检：初始化入口 initGameScript() 已申请屏幕投影权限，未授权直接退出，因此 colorProbeSlots() 内的 screenReady 探测与 ensureScreenCapture() 函数一并删除，不再重复取图确认。
 2.截图与媒体投影权限全脚本只在初始化入口申请一次，探测函数每次只取一张图做颜色统计。
@@ -252,7 +252,8 @@ const VERSION_CHANGE_LOG = `1.移除截图权限自检：初始化入口 initGam
 12.魔兽装备标记 isEquipPetFlag 初始值由 true 改为 false，脚本启动时不再假定魔兽已装备，手动进局遇怪时也能走装备流程；滑动分支内多余的置假语句已移除。
 13.新增全局标记 hasUnloadedPetOnFirstMapEnter，进入地图函数调用卸载前若为假，说明本轮还没卸载过魔兽，则先打标记并把 isEquipPetFlag 置真，保证首次进图能正常执行卸载、清掉上一轮残留。
 14.全军覆没/灵力耗尽处理流程同样按临时修改标记恢复开启系统AI战斗策略，并把标记清除，避免战败路径让策略长期处于关闭状态。
-15.新增自动更新：设置菜单新增"自动检测并下载更新"开关，开启后启动时后台静默检测并自动下载覆盖重启；主菜单新增"检测更新"，显示新版本号与更新日志并询问是否下载。
+15.新增自动更新：设置菜单新增"自动检测并下载更新"开关，开启后启动时后台静默检测并自动覆盖重启；主菜单新增"检测更新"，显示新版本号与更新日志并询问是否下载。
+16.本版本为更新链路测试版，功能与 2.6.9 完全一致，仅版本号不同。
 `;
 // 自动更新源：公共仓库地址，格式为 "用户名/仓库名@分支"，留空则关闭更新功能
 const UPDATE_REPO = "zhxlmzhx/msyj-helper@main";
@@ -645,6 +646,7 @@ let optList = [
 `自动爆发天罡 [${enableTianGangBlast ? "开启" : "关闭"}]`,
 `自动创建副本 [${enableCreateDungeon ? "开启" : "关闭"}]`,
 `使用系统AI战斗策略 [${enableSystemAIBattle ? "开启" : "关闭"}]`,
+`自动检测并下载更新 [${enableAutoUpdate ? "开启" : "关闭"}]`,
 `模式 [${["常规", "副队长", "尸体"][teamMode]}]`,
 `战斗卡牌 [${CARD_COUNT}张]`,
 `修炼属性 [${showAttrName}]`,
@@ -657,8 +659,7 @@ let optList = [
 `目标副本 [${dungeonCategoryList[selectedDungeonCategory].dungeons[selectedDungeonIndex].name}]`,
 `上次天神降临 [${lastGodSummonMap || ""}
 ${formatTime(lastGodSummonTime)}]`,
-`版本 [${VERSION_NAME}]`,
-`自动检测并下载更新 [${enableAutoUpdate ? "开启" : "关闭"}]`
+`版本 [${VERSION_NAME}]`
 ];
 let sel = dialogs.select("设置", optList);
 if (sel === -1)
@@ -760,6 +761,13 @@ break;
 }
 case 13:
 {
+enableAutoUpdate = !enableAutoUpdate;
+toast(enableAutoUpdate ? "已开启" : "已关闭");
+saveValidConfig(['enableAutoUpdate']);
+break;
+}
+case 14:
+{
 let idx = dialogs.select("模式", ["常规", "副队长", "尸体"]);
 if (idx >= 0)
 {
@@ -768,7 +776,7 @@ saveValidConfig(['teamMode']);
 }
 break;
 }
-case 14:
+case 15:
 {
 let idx = dialogs.select("战斗卡牌", ["1张", "2张", "3张", "4张", "5张"]);
 if (idx >= 0)
@@ -778,7 +786,7 @@ saveValidConfig(['CARD_COUNT']);
 }
 break;
 }
-case 15:
+case 16:
 {
 let idx = dialogs.select("修炼属性", practiceAttrList);
 if (idx !== -1)
@@ -788,7 +796,7 @@ saveValidConfig(['selectedPracticeSlideCount']);
 }
 break;
 }
-case 16:
+case 17:
 {
 let idx = dialogs.select("出战魔兽", ["1只", "2只", "3只"]);
 if (idx >= 0)
@@ -798,7 +806,7 @@ saveValidConfig(['maxPetCount']);
 }
 break;
 }
-case 17:
+case 18:
 {
 let idx = dialogs.select("当前职业", ["一转", "二转", "三转"]);
 if (idx === 0)
@@ -816,7 +824,7 @@ lingwuLimit = 120;
 saveValidConfig(['lingwuLimit']);
 break;
 }
-case 18:
+case 19:
 {
 let idx = dialogs.select("生产资源", ["200", "500", "2000"]);
 if (idx === 0)
@@ -834,7 +842,7 @@ collectResourceLimit = 2000;
 saveValidConfig(['collectResourceLimit']);
 break;
 }
-case 19:
+case 20:
 {
 let idx = dialogs.select("地图坐标上限", ["99", "149", "199"]);
 if (idx === 0)
@@ -852,7 +860,7 @@ mapCoordLimit = 199;
 saveValidConfig(['mapCoordLimit']);
 break;
 }
-case 20:
+case 21:
 {
 let idx = dialogs.select("召唤天神道具", godItemList);
 if (idx >= 0)
@@ -862,7 +870,7 @@ saveValidConfig(['selectedGodItem']);
 }
 break;
 }
-case 21:
+case 22:
 {
 let categoryNames = dungeonCategoryList.map(item => item.categoryName);
 let idx = dialogs.select("选择副本分类", categoryNames);
@@ -874,7 +882,7 @@ saveValidConfig(['selectedDungeonCategory', 'selectedDungeonIndex']);
 }
 break;
 }
-case 22:
+case 23:
 {
 let currentCategory = dungeonCategoryList[selectedDungeonCategory];
 let dungeonNames = currentCategory.dungeons.map(item => item.name);
@@ -886,24 +894,17 @@ saveValidConfig(['selectedDungeonIndex']);
 }
 break;
 }
-case 23:
+case 24:
 {
 toast("此项为只读信息，不可修改");
 break;
 }
-case 24:
+case 25:
 {
 dialogs.alert(`${VERSION_NAME}
 更新日志`,
 `${VERSION_CHANGE_LOG}\n${VERSION_UPDATE_TIME}`
 );
-break;
-}
-case 25:
-{
-enableAutoUpdate = !enableAutoUpdate;
-toast(enableAutoUpdate ? "已开启" : "已关闭");
-saveValidConfig(['enableAutoUpdate']);
 break;
 }
 }
