@@ -238,7 +238,8 @@ var jyqtsh = false;
 const VERSION_NAME = "2.7.0";
 const VERSION_CODE = 270;
 const VERSION_UPDATE_TIME = "2026-11-17";
-const VERSION_CHANGE_LOG = `1.新增第三方 IP 查询直连：先调用阿里云 DoH、腾讯 DoH、Cloudflare DoH 接口获取域名的 A 记录，用返回的真实 IP 配合 SNI 直连，完全绕开本机 DNS 劫持；接口结果同样过滤回环地址。
+const VERSION_CHANGE_LOG = `1.静默更新检测前增加提示：与手动检测一样先弹出“正在检测更新，请稍后”，让用户知道脚本正在检测而不是闪退。
+2.新增第三方 IP 查询直连：先调用阿里云 DoH、腾讯 DoH、Cloudflare DoH 接口获取域名的 A 记录，用返回的真实 IP 配合 SNI 直连，完全绕开本机 DNS 劫持；接口结果同样过滤回环地址。
 2.静默更新改到菜单项点击后触发：检测更新与退出脚本两项不判定，点击其余任意菜单项时先确认开关开启且本轮未跑过，再执行一次静默更新。
 2.IPv4 直连排除回环地址：某些 WiFi 会把域名解析成 127.x.x.x 等本机回环地址，解析结果里同时存在多个地址时，自动过滤 127/0/169.254 开头的无效地址再连接。
 3.静默检测更新移回初始化入口之前：主菜单返回后、initGameScript() 之前判断开关与标记，符合就执行一次。
@@ -2116,10 +2117,8 @@ return null;
 // 检测更新：直接下载整份脚本比对版本号；silent 为真表示自动更新，找到新版本不询问直接覆盖
 function manualCheckUpdate(silent)
 {
-if (!silent)
-{
+// 静默与手动都先提示，避免用户在检测期间误以为脚本闪退
 toast("正在检测更新，请稍后");
-}
 var remote = fetchRemoteScript();
 if (!remote)
 {
