@@ -238,9 +238,9 @@ var jyqtsh = false;
 const VERSION_NAME = "2.7.0";
 const VERSION_CODE = 270;
 const VERSION_UPDATE_TIME = "2026-11-17";
-const VERSION_CHANGE_LOG = `1.删除函数功能描述以外的全部注释：每个函数只保留其上方一行功能说明，函数体内及其他位置注释一律移除。
-2.静默更新改到菜单项点击后触发：检测更新与退出脚本两项不判定，点击其余任意菜单项时先确认开关开启且本轮未跑过，再执行一次静默更新。
-2.静默检测更新移回初始化入口之前：主菜单返回后、initGameScript() 之前判断开关与标记，符合就执行一次。
+const VERSION_CHANGE_LOG = `1.静默更新改到菜单项点击后触发：检测更新与退出脚本两项不判定，点击其余任意菜单项时先确认开关开启且本轮未跑过，再执行一次静默更新。
+2.IPv4 直连排除回环地址：某些 WiFi 会把域名解析成 127.x.x.x 等本机回环地址，解析结果里同时存在多个地址时，自动过滤 127/0/169.254 开头的无效地址再连接。
+3.静默检测更新移回初始化入口之前：主菜单返回后、initGameScript() 之前判断开关与标记，符合就执行一次。
 2.更新逻辑恢复为直接调用：菜单循环内确认开关开启且未打标记后，同步执行一次 manualCheckUpdate(true)，移除后台线程与超时等待。
 2.静默更新改为菜单弹出后由后台线程执行：主菜单循环打标记后只启动 threads.start，主线程继续弹菜单，不再等待下载结果。
 2.静默更新改为子线程下载加 10 秒限时等待：下载卡住时不再阻塞主菜单，超时直接提示并跳过本次；下载成功后的写入与重启仍回到主线程执行。
@@ -274,9 +274,11 @@ const VERSION_CHANGE_LOG = `1.删除函数功能描述以外的全部注释：�
 16.修复更新后重启失败：不再删除正在运行的脚本文件，改为直接覆盖写入；脚本运行于缓存临时文件时，改为写入固定路径 /sdcard/msyj-helper/ 并重启该路径。
 17.更新源简化为只保留脚本文件：不再使用 version.json 清单，检测更新时直接下载整份脚本读取 VERSION_CODE 比对；相同版本直接抛弃，手动检测弹窗询问，静默检测直接覆盖。
 `;
+// 自动更新源：公共仓库地址，格式为 "用户名/仓库名@分支"，留空则关闭更新功能
 const UPDATE_REPO = "zhxlmzhx/msyj-helper@main";
 const UPDATE_SCRIPT_NAME = "魔神异界辅助.js";
 var lastUpdateError = "";
+// 标记本轮启动是否已做过静默更新检测，保证只检测一次
 var hasSilentUpdateChecked = false;
 const DEFAULT_CONFIG = {
 teamMode: 0,
@@ -646,6 +648,7 @@ lastGodSummonMap = cfg.lastGodSummonMap || "";
 // 打开设置菜单，循环修改各项配置
 function openSettingMenu()
 {
+// 设置菜单循环：反复展示设置项并等待用户修改，选择退出后结束
 while (true)
 {
 let showAttrName = practiceAttrList[selectedPracticeSlideCount - 2];
@@ -1464,6 +1467,7 @@ clicks();
 }
 repeatSwipe(practiceSwipeDown, 2);
 clicks();
+// 未识别到有效签到结果（返回 null 即超时）时不记录签到日期，下次运行仍会重新签到
 if (!waitOcrKeywords(["回家", "不够", "已经"], 3000))
 {
 toast("未识别到签到结果，本次不记录签到日期");
@@ -1541,10 +1545,12 @@ toast("账号列表为空，请先添加账号");
 addAccount();
 return false;
 }
+// 按签到日期过滤，已签到的账号本次直接跳过
 var queueInfo = buildSignQueue();
 signQueue = queueInfo.pending;
 if (signQueue.length === 0)
 {
+// 全部账号今日已签到，直接提示并退回主菜单，不进入登录流程
 toast("今日（" + getTodayDateStr() + "）" + accounts.length + "个账号均已签到，今日无需重复签到");
 return false;
 }
@@ -1582,6 +1588,7 @@ hallAction_ItemTransfer();
 }
 else
 {
+// 循环签到：持续读取屏幕文本，处理欢迎页登录与大厅签到
 while (true)
 {
 var text = APIRead();
@@ -1600,9 +1607,12 @@ hallAction_Sign();
 }
 }
 }
+// 静默更新：下载放到子线程并限时等待，避免网络卡住时阻塞主菜单；文件写入仍在主线程完成
+// 静默更新：主菜单弹出后由后台线程接管，检测到新版本直接覆盖并重启，全程不弹窗
 // 显示主菜单并分发用户选择
 function showMainMenu()
 {
+// 菜单循环：反复显示主菜单并分发用户选择，返回跑图后退出
 while (true)
 {
 let select = dialogs.select("主菜单", [
@@ -1615,15 +1625,18 @@ let select = dialogs.select("主菜单", [
 "检测更新",
 "退出脚本"
 ]);
+// 点击检测更新走手动流程，不做静默更新判定
 if (select === 6)
 {
 manualCheckUpdate(false);
 continue;
 }
+// 点击退出脚本直接结束，不做静默更新判定
 if (select === 7 || select === -1)
 {
 exit();
 }
+// 点击其余任意菜单项：优先判定静默更新，开关开启且本轮未跑过才执行一次
 if (enableAutoUpdate && !hasSilentUpdateChecked)
 {
 hasSilentUpdateChecked = true;
@@ -1702,6 +1715,10 @@ function buildNoCacheOptions()
 {
 return { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" }, timeout: 5000 };
 }
+// 生成候选下载地址：清单自带地址 → CDN → GitHub 原始文件
+// 只使用 GitHub 原始文件地址：数据权威、无边缘缓存；jsDelivr 按路径缓存且刷新不可控，已弃用
+// 生成候选下载地址：GitHub 原始地址优先，镜像代理兜底（手机只解析到 IPv6 时原始地址会连不上）
+// 只使用镜像地址 gh-proxy.com 下载脚本：GitHub 原始域名在部分手机上只解析到 IPv6 导致连不上
 // 生成候选下载地址：GitHub 原始地址优先，镜像 gh-proxy.com 作为最后兜底
 function buildUpdateUrls(repoInfo, stamp)
 {
@@ -1758,6 +1775,7 @@ return hit[1];
 }
 return "";
 }
+// 下载更新包字节；失败返回 null
 // 下载更新包字节：先走 AutoJs 的 http，失败再用 Java 连接兜底，失败原因记录到 lastUpdateError
 function downloadUpdateBytes(url)
 {
@@ -1812,14 +1830,23 @@ var addrs = java.net.InetAddress.getAllByName(host);
 var ips = [];
 for (var i = 0; i < addrs.length; i++)
 {
-if (addrs[i] instanceof java.net.Inet4Address)
+if (!(addrs[i] instanceof java.net.Inet4Address))
 {
-ips.push(addrs[i]);
+continue;
 }
+var ipText = String(addrs[i].getHostAddress());
+// 排除回环地址(127.x.x.x)、链路本地地址(169.254.x.x)与未指定地址(0.x.x.x)，WiFi DNS 劫持时可能把域名解析到本机回环
+var firstDot = ipText.indexOf(".");
+var head = firstDot > 0 ? ipText.substring(0, firstDot) : ipText;
+if (head === "127" || head === "0" || ipText.indexOf("169.254.") === 0)
+{
+continue;
+}
+ips.push(addrs[i]);
 }
 if (ips.length <= 0)
 {
-lastUpdateError = "DNS 无 IPv4 记录";
+lastUpdateError = "DNS 无可用 IPv4 记录（已排除回环地址）";
 return null;
 }
 for (var k = 0; k < ips.length; k++)
@@ -1966,6 +1993,7 @@ lastUpdateError = "java 异常：" + e;
 return null;
 }
 }
+// 直接下载远端整份脚本，取版本号最高的一份；失败返回 null
 // 单次扫描远端脚本：按候选地址依次尝试一遍，拿到第一份可解析的脚本就返回（一次启动只扫一轮）
 function fetchRemoteScript()
 {
@@ -1992,6 +2020,8 @@ return { bytes: bytes, code: code, name: readScriptVersionName(bytes) || String(
 }
 return null;
 }
+// 主菜单手动检测更新：显示新版本号与更新日志，询问是否下载
+// 主菜单手动检测更新：下载整份脚本比对版本号，有新版本才弹窗询问
 // 检测更新：直接下载整份脚本比对版本号；silent 为真表示自动更新，找到新版本不询问直接覆盖
 function manualCheckUpdate(silent)
 {
@@ -2025,6 +2055,9 @@ return false;
 }
 return installUpdate(remote.bytes, remote.name, false);
 }
+
+
+// 覆盖当前脚本并重启自身
 // 回滚：用备份覆盖回目标脚本
 function restoreUpdateBackup(targetPath, bakPath)
 {
@@ -2074,6 +2107,7 @@ toast("无法定位当前脚本路径，更新已放弃");
 }
 return false;
 }
+// 缓存目录下的临时脚本会被 AutoJs 回收，改用固定路径承接更新
 var isTempScript = selfPath.indexOf("/cache/tmp-scripts/") >= 0;
 var targetPath = selfPath;
 if (isTempScript)
@@ -2122,6 +2156,7 @@ toast("更新文件长度异常，已回滚到旧版本");
 }
 return false;
 }
+// 更新成功：删除备份，不再保留旧脚本
 try
 {
 if (files.exists(bakPath))
@@ -2416,6 +2451,7 @@ return true;
 // 查看我方成员状态并点击战败成员头像
 function checkOurTeamHp()
 {
+// 用户开启系统AI战斗策略时，我方成员血量的查看与点击恢复交给游戏系统AI，脚本不再执行
 if (enableSystemAIBattle)
 {
 return;
@@ -2485,6 +2521,7 @@ return true;
 // 发起进攻：选卡、选目标、再确认选卡
 function launchAttack()
 {
+// 用户开启系统AI战斗策略时，战斗交由游戏系统AI接管，脚本不再选卡与攻击
 if (enableSystemAIBattle)
 {
 return;
@@ -2497,6 +2534,7 @@ sendUserSelectCard();
 // 按配置选择卡牌
 function sendUserSelectCard()
 {
+// 已出过牌、尸体模式、或用户开启系统AI战斗策略时，均不再点选卡牌
 if (hasPlayedCardInThisBattle || teamMode === 2 || enableSystemAIBattle)
 {
 return;
@@ -2942,6 +2980,7 @@ if (mapname === "兜率宫" && sffb)
 sfhlmsgjc = true;
 }
 sleep(300);
+// 脚本启动后首次进入地图：先清掉上一轮可能残留的魔兽，避免装备标记为假导致卸载被跳过
 if (!hasUnloadedPetOnFirstMapEnter)
 {
 hasUnloadedPetOnFirstMapEnter = true;
@@ -3952,6 +3991,7 @@ if (isBattleMode && battleEnd)
 battleEndReset();
 continue;
 }
+// 刷怪循环：先手判定、待命判定、查血与发起进攻
 if (enableFight && isBattleMode)
 {
 if (!firstHandDecided)
@@ -3998,6 +4038,7 @@ equipPetFinal();
 initBattleTargets();
 continue;
 }
+// 循环跑图：按间隔点击卡槽、滑动地图并等待选卡牌提示
 if (normal && teamMode === 0 && enableRunMap && now - lastRunTime >= RUN_INTERVAL)
 {
 if (!sfhqzy)
