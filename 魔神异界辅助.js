@@ -238,7 +238,8 @@ var jyqtsh = false;
 const VERSION_NAME = "2.7.0";
 const VERSION_CODE = 270;
 const VERSION_UPDATE_TIME = "2026-11-17";
-const VERSION_CHANGE_LOG = `1.静默更新改到菜单项点击后触发：检测更新与退出脚本两项不判定，点击其余任意菜单项时先确认开关开启且本轮未跑过，再执行一次静默更新。
+const VERSION_CHANGE_LOG = `1.新增第三方 IP 查询直连：先调用阿里云 DoH、腾讯 DoH、Cloudflare DoH 接口获取域名的 A 记录，用返回的真实 IP 配合 SNI 直连，完全绕开本机 DNS 劫持；接口结果同样过滤回环地址。
+2.静默更新改到菜单项点击后触发：检测更新与退出脚本两项不判定，点击其余任意菜单项时先确认开关开启且本轮未跑过，再执行一次静默更新。
 2.IPv4 直连排除回环地址：某些 WiFi 会把域名解析成 127.x.x.x 等本机回环地址，解析结果里同时存在多个地址时，自动过滤 127/0/169.254 开头的无效地址再连接。
 3.静默检测更新移回初始化入口之前：主菜单返回后、initGameScript() 之前判断开关与标记，符合就执行一次。
 2.更新逻辑恢复为直接调用：菜单循环内确认开关开启且未打标记后，同步执行一次 manualCheckUpdate(true)，移除后台线程与超时等待。
@@ -1787,6 +1788,11 @@ return bytes;
 }
 if (Date.now() - startTime <= 6000)
 {
+bytes = downloadByDoh(url);
+if (bytes && bytes.length > 0)
+{
+return bytes;
+}
 bytes = downloadByIpv4(url);
 if (bytes && bytes.length > 0)
 {
@@ -1819,6 +1825,91 @@ return null;
 }
 }
 // 强制 IPv4 直连：解析 A 记录后连 IP，但用 SNI + HTTPS 主机名校验，证书仍按域名验证
+// 调用第三方 DoH 接口查询域名的 A 记录，返回过滤回环后的 IPv4 列表
+function resolveIpv4ByDoh(host)
+{
+var apis = [
+"https://dns.alidns.com/resolve?name=" + encodeURIComponent(host) + "&type=A",
+"https://doh.pub/dns-query?name=" + encodeURIComponent(host) + "&type=A",
+"https://1.1.1.1/dns-query?name=" + encodeURIComponent(host) + "&type=A"
+];
+var ips = [];
+for (var i = 0; i < apis.length; i++)
+{
+try
+{
+var resp = http.get(apis[i], { headers: { "Accept": "application/dns-json" }, timeout: 5000 });
+if (!resp || resp.statusCode !== 200)
+{
+continue;
+}
+var data = JSON.parse(String(resp.body.string()));
+if (!data || !Array.isArray(data.Answer))
+{
+continue;
+}
+for (var j = 0; j < data.Answer.length; j++)
+{
+if (data.Answer[j].type !== 1)
+{
+continue;
+}
+var ip = String(data.Answer[j].data || "");
+if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip))
+{
+continue;
+}
+if (ip.indexOf("127.") === 0 || ip.indexOf("0.") === 0 || ip.indexOf("169.254.") === 0)
+{
+continue;
+}
+if (ips.indexOf(ip) < 0)
+{
+ips.push(ip);
+}
+}
+if (ips.length > 0)
+{
+return ips;
+}
+}
+catch (e)
+{
+}
+}
+return ips;
+}
+// 用第三方接口返回的 IP 直连：SNI 与证书校验仍按域名，不走本机 DNS
+function downloadByDoh(rawUrl)
+{
+try
+{
+var uri = new java.net.URL(rawUrl);
+var host = String(uri.getHost());
+var file = String(uri.getFile());
+var ips = resolveIpv4ByDoh(host);
+if (ips.length <= 0)
+{
+lastUpdateError = "第三方 IP 查询接口无可用结果";
+return null;
+}
+for (var k = 0; k < ips.length; k++)
+{
+var addr = java.net.InetAddress.getByName(ips[k]);
+var bytes = requestOverIpv4(host, addr, file);
+if (bytes && bytes.length > 0)
+{
+return bytes;
+}
+}
+return null;
+}
+catch (e)
+{
+lastUpdateError = "IP 查询直连异常：" + e;
+return null;
+}
+}
 function downloadByIpv4(rawUrl)
 {
 try
